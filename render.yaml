@@ -1,0 +1,39 @@
+# Render Blueprint for the ETF Loans Spring Boot backend.
+# Spring Boot does not run as a Vercel serverless function; host it on Render
+# (Docker) and point the Flutter Web build at this service.
+services:
+  - type: web
+    name: etf-loans-backend
+    runtime: docker
+    rootDir: etf-loans-backend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      # Provide these in the Render dashboard (do not commit secrets).
+      - key: DB_URL
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: ETF_OTP_KEY
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      # Demonstration-only mock OTP. Set to "false" for any real deployment.
+      - key: ETF_OTP_MOCK_ENABLED
+        sync: false
+      - key: ETF_OTP_MOCK_CODE
+        sync: false
+      # Demo access control (required if ETF_DEMO_ENABLED=true)
+      # SECURITY: NO client-side secrets. Keys held ONLY in server-side environments:
+      # - Vercel Serverless Function environment: ETF_DEMO_API_KEY
+      # - Android build/secure storage: ETF_DEMO_ANDROID_API_KEY
+      # Backend validates X-API-Key header against these secrets.
+      - key: ETF_DEMO_ENABLED
+        sync: false
+      - key: ETF_DEMO_API_KEY
+        sync: false
+      - key: ETF_DEMO_ANDROID_API_KEY
+        sync: false

@@ -1,0 +1,17 @@
+# Flutter analysis options specification
+# https://dart.dev/guides/language/analysis
+# For more information about Dart analysis, see https://dart.dev/tools/analysis
+
+# The following enables specification of the analyzer section from the pubspec.
+# The analyzer section defines the analysis settings for the project.
+# To disable analysis, set include: false below.
+
+# include: false
+
+# You can also specify analyzer settings using the "include" and "languages" options.
+# The "include" option specifies which files to include in the analysis.
+# The "languages" option specifies the language version to use.
+
+# analyzer:
+#   language:
+#     analyzer_options:

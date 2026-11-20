@@ -1,0 +1,379 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>ETF Loans Site Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Plus+Jakarta+Sans:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; a wrapped stepper for the main path, then area panels whose screen cards show route, purpose and exits. */
+:root {
+  --bg: #f4f7f4;
+  --surface: #ffffff;
+  --ink: #0f1f16;
+  --muted: #56675c;
+  --line: #d6e0d8;
+  --brand: #0a2e1b;
+  --accent: #15703b;
+  --accent-soft: #e2f1e7;
+  --lock: #8a5a00;
+  --lock-soft: #fbf0d9;
+  --ext: #2d4fa3;
+  --ext-soft: #e4ebfa;
+  --display: "Plus Jakarta Sans", system-ui, sans-serif;
+  --body: "DM Sans", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b1510; --surface: #12211a; --ink: #e5efe8; --muted: #9db2a4; --line: #24382c;
+  --brand: #0a2e1b; --accent: #5fd08f; --accent-soft: #163a26; --lock: #f0c060; --lock-soft: #3a2e12;
+  --ext: #93b0f5; --ext-soft: #1b2645; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0b1510; --surface: #12211a; --ink: #e5efe8; --muted: #9db2a4; --line: #24382c;
+  --brand: #0a2e1b; --accent: #5fd08f; --accent-soft: #163a26; --lock: #f0c060; --lock-soft: #3a2e12;
+  --ext: #93b0f5; --ext-soft: #1b2645; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.55; }
+.band { background: var(--brand); color: #e8f5ec; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header .wrap { padding-block: 40px 32px; display: grid; gap: 12px; }
+.eyebrow { font: 600 12px/1 var(--body); letter-spacing: .12em; text-transform: uppercase; color: #8fd3a8; }
+h1 { font: 800 clamp(30px, 5vw, 44px)/1.1 var(--display); margin: 0; text-wrap: balance; }
+header p { margin: 0; max-width: 62ch; color: #c3dccb; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 8px; font-size: 13px; color: #c3dccb; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.dot.pub { background: #5fd08f; } .dot.lock { background: #f0c060; } .dot.ext { background: #93b0f5; }
+
+main .wrap { padding-block: 32px 56px; display: grid; gap: 40px; }
+h2 { font: 700 22px/1.2 var(--display); margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 16px; max-width: 65ch; }
+code, .route { font-family: var(--mono); font-size: 12.5px; }
+
+/* main path stepper */
+.path { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px 0; counter-reset: s; }
+.path li { display: flex; align-items: center; counter-increment: s; }
+.path li:not(:last-child)::after { content: "→"; color: var(--muted); padding: 0 8px; }
+.step { display: grid; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.step::before { content: counter(s); font: 600 11px/1 var(--mono); color: var(--muted); }
+.step b { font: 600 14px/1.2 var(--display); }
+.step .route { color: var(--muted); }
+
+/* route tree */
+.treewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.tree { margin: 0; padding: 16px 18px; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; color: var(--ink); white-space: pre; tab-size: 4; }
+
+/* area panels */
+.areas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 20px; }
+.area { display: grid; gap: 10px; align-content: start; }
+.area h3 { font: 700 13px/1 var(--body); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 0; padding-bottom: 8px; border-bottom: 2px solid var(--accent); }
+.screen { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 12px 14px; display: grid; gap: 6px; min-width: 0; }
+.screen.lock { border-left-color: var(--lock); }
+.screen.ext { border-left-color: var(--ext); }
+.screen.child { margin-left: 18px; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.top b { font: 700 15px/1.2 var(--display); }
+.top .route { color: var(--muted); word-break: break-all; }
+.screen p { margin: 0; font-size: 14px; color: var(--muted); }
+.exits { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.chip { font-family: var(--mono); font-size: 11.5px; padding: 2px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.chip.back { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.chip.ext { background: var(--ext-soft); color: var(--ext); }
+.tag { font: 600 10.5px/1 var(--body); letter-spacing: .06em; text-transform: uppercase; padding: 3px 6px; border-radius: 4px; }
+.tag.lock { background: var(--lock-soft); color: var(--lock); }
+.tag.pub { background: var(--accent-soft); color: var(--accent); }
+
+/* nav bar mock */
+.tabbar { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface); font: 600 13px/1 var(--display); }
+.tabbar span { flex: 1; text-align: center; padding: 10px 0; border-right: 1px solid var(--line); }
+.tabbar span:last-child { border-right: 0; }
+
+/* rules */
+.rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.rule { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 8px; align-content: start; }
+.rule h4 { margin: 0; font: 700 15px/1.3 var(--display); }
+.rule p { margin: 0; font-size: 14px; color: var(--muted); }
+.decide { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13.5px; }
+.decide dt { color: var(--muted); }
+.decide dd { margin: 0; }
+
+/* api table */
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 520px; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font: 600 12px/1 var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+td:first-child { font-weight: 600; white-space: nowrap; }
+td code { display: inline-block; margin: 0 6px 4px 0; color: var(--accent); }
+footer { color: var(--muted); font-size: 13px; }
+</style>
+
+<header class="band">
+  <div class="wrap">
+    <div class="eyebrow">etf-loans.vercel.app · hash-routed single-page app</div>
+    <h1>ETF Loans Site Map</h1>
+    <p>All 24 screens of the ETF Loans web app, where each one leads, and which outside services it hands off to. Routes are read from the app's router in <code>/app.js</code>.</p>
+    <div class="legend">
+      <span><i class="dot pub"></i>Public, no sign-in</span>
+      <span><i class="dot lock"></i>Sign-in required (redirects to <code>#/login</code>)</span>
+      <span><i class="dot ext"></i>Return point from an outside service</span>
+    </div>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+  <section>
+    <h2>Route tree</h2>
+    <p class="sub">The whole app as one tree. 🔒 marks a screen that needs sign-in.</p>
+    <div class="treewrap"><pre class="tree">/ (#/welcome)                     Landing page, "Check my eligibility"
+├── #/terms                       Terms of Service (public)
+├── #/privacy                     Privacy Policy (public)
+│
+├── SIGN-IN
+│   ├── #/login                   Mobile number (+ demo login)
+│   ├── #/otp                     Enter OTP  → back: login
+│   └── #/face 🔒                 Selfie / face check ("Sign in, step 2 of 2")
+│       ├── QR handoff → #/selfie?t=&lt;token&gt;   (opened on phone, no account needed)
+│       └──              #/selfie-done        (phone side, confirmation)
+│
+├── ONBOARDING / ELIGIBILITY
+│   ├── #/details 🔒              First-time profile form (if no profile)
+│   ├── #/update 🔒               Edit existing profile  → back: profile
+│   ├── #/checking 🔒             Credit/eligibility check in progress
+│   └── #/result 🔒               Eligibility result &amp; credit band → back: home
+│
+├── LOAN APPLICATION
+│   ├── #/offer 🔒                Amount/tenure calculator → back: result
+│   ├── #/review 🔒               Server quote, full cost, accept → back: offer
+│   └── #/success 🔒              Loan confirmed (falls back to home)
+│
+├── MAIN APP  (bottom nav: Home · Loans · Profile)
+│   ├── #/home 🔒                 Dashboard: next EMI, inbox, apply again
+│   │   ├── #/inbox 🔒            Notifications → back: home
+│   │   └── #/kyc-start 🔒        Aadhaar via DigiLocker (sign in / sign up)
+│   │       └── (DigiLocker) → #/kyc-return   Aadhaar verification result
+│   ├── #/loans 🔒                All loans, EMI schedule, pay EMI
+│   │   └── (Cashfree) → #/pay-return?o=&lt;orderId&gt;   Payment result → loans
+│   └── #/profile 🔒              Account details
+│       ├── #/update 🔒           Edit profile
+│       ├── #/face 🔒             Redo face check
+│       └── #/delete 🔒           Delete account → back: profile
+│
+└── Any unknown hash → #/welcome</pre></div>
+  </section>
+
+  <section>
+    <h2>Main borrower path</h2>
+    <p class="sub">A first-time borrower goes from the landing page to a disbursed loan in eleven screens.</p>
+    <ol class="path">
+      <li><span class="step"><b>Welcome</b><span class="route">#/welcome</span></span></li>
+      <li><span class="step"><b>Mobile number</b><span class="route">#/login</span></span></li>
+      <li><span class="step"><b>Enter OTP</b><span class="route">#/otp</span></span></li>
+      <li><span class="step"><b>Face check</b><span class="route">#/face</span></span></li>
+      <li><span class="step"><b>Your details</b><span class="route">#/details</span></span></li>
+      <li><span class="step"><b>Checking</b><span class="route">#/checking</span></span></li>
+      <li><span class="step"><b>Eligibility result</b><span class="route">#/result</span></span></li>
+      <li><span class="step"><b>Choose amount</b><span class="route">#/offer</span></span></li>
+      <li><span class="step"><b>Review & accept</b><span class="route">#/review</span></span></li>
+      <li><span class="step"><b>Loan confirmed</b><span class="route">#/success</span></span></li>
+      <li><span class="step"><b>Home</b><span class="route">#/home</span></span></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Every screen, by area</h2>
+    <p class="sub">Green chips are forward links on the screen. Outlined chips are the Back button target. Blue chips leave the app.</p>
+    <div class="areas">
+
+      <div class="area">
+        <h3>Public</h3>
+        <div class="screen">
+          <div class="top"><b>Welcome</b><span class="route">#/  ·  #/welcome</span></div>
+          <p>Landing page with the three promises and “Check my eligibility”. Any unknown route also lands here.</p>
+          <div class="exits"><span class="chip">login</span><span class="chip">details / result / home*</span><span class="chip">terms</span><span class="chip">privacy</span></div>
+        </div>
+        <div class="screen">
+          <div class="top"><b>Terms of Service</b><span class="route">#/terms</span></div>
+          <div class="exits"><span class="chip back">← previous page</span></div>
+        </div>
+        <div class="screen">
+          <div class="top"><b>Privacy Policy</b><span class="route">#/privacy</span></div>
+          <div class="exits"><span class="chip back">← previous page</span></div>
+        </div>
+      </div>
+
+      <div class="area">
+        <h3>Sign-in</h3>
+        <div class="screen">
+          <div class="top"><b>Mobile number</b><span class="route">#/login</span></div>
+          <p>Sends an OTP. Also has a demo login.</p>
+          <div class="exits"><span class="chip back">← welcome</span><span class="chip">otp</span><span class="chip">face</span></div>
+        </div>
+        <div class="screen">
+          <div class="top"><b>Enter OTP</b><span class="route">#/otp</span></div>
+          <p>Needs an OTP already sent, otherwise returns to login. “Change number” goes back.</p>
+          <div class="exits"><span class="chip back">← login</span><span class="chip">face</span></div>
+        </div>
+        <div class="screen lock">
+          <div class="top"><b>Face check</b><span class="route">#/face</span></div>
+          <p>Sign in, step 2 of 2. Uses the camera, or shows a QR code to finish on a phone. Can be skipped.</p>
+          <div class="exits"><span class="chip">next step*</span><span class="chip">profile (when redone)</span></div>
+        </div>
+        <div class="screen child">
+          <div class="top"><b>Phone selfie</b><span class="route">#/selfie?t=…</span></div>
+          <p>Opened by scanning the QR code. Works without an account on the phone.</p>
+          <div class="exits"><span class="chip">selfie-done</span></div>
+        </div>
+        <div class="screen child">
+          <div class="top"><b>Selfie sent</b><span class="route">#/selfie-done</span></div>
+          <p>Tells the person to go back to the other device.</p>
+        </div>
+      </div>
+
+      <div class="area">
+        <h3>Profile & eligibility</h3>
+        <div class="screen lock">
+          <div class="top"><b>Your details</b><span class="route">#/details</span></div>
+          <p>First-time profile form. Redirects to update if a profile exists.</p>
+          <div class="exits"><span class="chip">checking</span></div>
+        </div>
+        <div class="screen lock">
+          <div class="top"><b>Update details</b><span class="route">#/update</span></div>
+          <p>Edit an existing profile and re-run the check.</p>
+          <div class="exits"><span class="chip back">← profile</span><span class="chip">checking</span></div>
+        </div>
+        <div class="screen lock">
+          <div class="top"><b>Checking</b><span class="route">#/checking</span></div>
+          <p>Runs the credit and eligibility check. Returns to the form on error.</p>
+          <div class="exits"><span class="chip">result</span></div>
+        </div>
+        <div class="screen lock">
+          <div class="top"><b>Eligibility result</b><span class="route">#/result</span></div>
+          <p>Credit band and approved limit.</p>
+          <div class="exits"><span class="chip back">← home</span><span class="chip">offer</span><span class="chip">update</span><span class="chip">home</span></div>
+        </div>
+      </div>
+
+      <div class="area">
+        <h3>Loan application</h3>
+        <div class="screen lock">
+          <div class="top"><b>Choose amount</b><span class="route">#/offer</span></div>
+          <p>Amount and EMI plan calculator. Sends ineligible users back to result.</p>
+          <div class="exits"><span class="chip back">← result</span><span class="chip">review</span></div>
+        </div>
+        <div class="screen lock">
+          <div class="top"><b>Review & accept</b><span class="route">#/review</span></div>
+          <p>Server quote with the full cost, then accept.</p>
+          <div class="exits"><span class="chip back">← offer</span><span class="chip">success</span></div>
+        </div>
+        <div class="screen lock">
+          <div class="top"><b>Loan confirmed</b><span class="route">#/success</span></div>
+          <p>Confirmation. Falls back to home if there is no new loan.</p>
+          <div class="exits"><span class="chip">home</span></div>
+        </div>
+      </div>
+
+      <div class="area">
+        <h3>Signed-in app</h3>
+        <div class="tabbar" aria-label="Bottom navigation"><span>Home</span><span>Loans</span><span>Profile</span></div>
+        <div class="screen lock">
+          <div class="top"><b>Home</b><span class="route">#/home</span></div>
+          <p>Dashboard: next EMI, Aadhaar prompt, apply again.</p>
+          <div class="exits"><span class="chip">inbox</span><span class="chip">kyc-start</span><span class="chip">loans</span><span class="chip">offer / result / details</span></div>
+        </div>
+        <div class="screen lock child">
+          <div class="top"><b>Inbox</b><span class="route">#/inbox</span></div>
+          <div class="exits"><span class="chip back">← home</span></div>
+        </div>
+        <div class="screen lock child">
+          <div class="top"><b>Verify Aadhaar</b><span class="route">#/kyc-start</span></div>
+          <p>Sign in to or create a DigiLocker account.</p>
+          <div class="exits"><span class="chip back">← home</span><span class="chip ext">DigiLocker ↗</span></div>
+        </div>
+        <div class="screen lock">
+          <div class="top"><b>Loans</b><span class="route">#/loans</span></div>
+          <p>All loans, EMI schedule, pay an EMI.</p>
+          <div class="exits"><span class="chip ext">Cashfree ↗</span></div>
+        </div>
+        <div class="screen lock">
+          <div class="top"><b>Profile</b><span class="route">#/profile</span></div>
+          <p>Account details and settings.</p>
+          <div class="exits"><span class="chip">update</span><span class="chip">face</span><span class="chip">delete</span></div>
+        </div>
+        <div class="screen lock child">
+          <div class="top"><b>Delete account</b><span class="route">#/delete</span></div>
+          <div class="exits"><span class="chip back">← profile</span></div>
+        </div>
+      </div>
+
+      <div class="area">
+        <h3>Return points</h3>
+        <div class="screen ext">
+          <div class="top"><b>Aadhaar result</b><span class="route">#/kyc-return</span></div>
+          <p>DigiLocker sends the person back here. Polls the verification status.</p>
+          <div class="exits"><span class="chip">home</span><span class="chip">offer</span></div>
+        </div>
+        <div class="screen ext">
+          <div class="top"><b>Payment result</b><span class="route">#/pay-return?o=…</span></div>
+          <p>Cashfree sends the person back here with the order ID. Confirms the EMI payment.</p>
+          <div class="exits"><span class="chip">loans</span></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <h2>Routing rules</h2>
+    <p class="sub">Rules in the router that change where a person ends up.</p>
+    <div class="rules">
+      <div class="rule">
+        <h4>* “Check my eligibility” picks a destination</h4>
+        <dl class="decide">
+          <dt>Not signed in</dt><dd><code>#/login</code></dd>
+          <dt>No profile yet</dt><dd><code>#/details</code></dd>
+          <dt>Has a loan</dt><dd><code>#/home</code></dd>
+          <dt>Otherwise</dt><dd><code>#/result</code></dd>
+        </dl>
+        <p>The face check uses the same rule for its next step.</p>
+      </div>
+      <div class="rule">
+        <h4>A refresh signs you out</h4>
+        <p>Reloading any signed-in screen logs the session out and opens <code>#/login</code>. Only welcome, terms, privacy, kyc-return and pay-return keep the session on reload.</p>
+      </div>
+      <div class="rule">
+        <h4>Sign-in guard</h4>
+        <p>14 screens need a session. Without one, or after any <code>401</code> from the API, the app goes to <code>#/login</code>.</p>
+      </div>
+      <div class="rule">
+        <h4>Search engines see one page</h4>
+        <p>Everything after <code>#</code> is ignored by crawlers, and the site has no <code>robots.txt</code> or <code>sitemap.xml</code>. Terms and Privacy would need real paths such as <code>/terms</code> to be indexed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>API endpoints behind the screens</h2>
+    <p class="sub">Calls made from <code>app.js</code>, grouped by the part of the app that uses them.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Area</th><th>Endpoints</th></tr></thead>
+        <tbody>
+          <tr><td>App start</td><td><code>GET /api/config</code><code>GET /api/me</code></td></tr>
+          <tr><td>Sign-in</td><td><code>/api/otp/send</code><code>/api/otp/verify</code><code>/api/otp/skip</code><code>/api/demo/login</code></td></tr>
+          <tr><td>Face check</td><td><code>/api/face</code><code>/api/face/submit</code><code>/api/face/handoff</code><code>/api/face/handoff/open</code><code>/api/face/handoff/status</code></td></tr>
+          <tr><td>Profile & KYC</td><td><code>/api/profile</code><code>/api/kyc/pan</code><code>/api/kyc/aadhaar/start</code><code>/api/kyc/aadhaar/status</code></td></tr>
+          <tr><td>Loans</td><td><code>/api/loan/quote</code><code>/api/loan/accept</code></td></tr>
+          <tr><td>Payments</td><td><code>/api/pay/start</code><code>/api/pay/confirm</code></td></tr>
+          <tr><td>Inbox</td><td><code>/api/inbox</code><code>/api/inbox/read</code><code>/api/push/subscribe</code></td></tr>
+          <tr><td>Account</td><td><code>/api/logout</code><code>/api/logout/all</code><code>/api/account/delete</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>Mapped from the live site on 14 November 2026.</footer>
+</div>
+</main>
+
+</body></html>

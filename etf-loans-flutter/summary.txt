@@ -1,0 +1,6 @@
+File contents read successfully. Key dart analyze errors identified:
+1. Missing auth_models.g.dart - run build_runner
+2. CardTheme type mismatch in theme_config.dart
+3. Deprecated 'background' color usage
+4. Unused imports across files
+5. Constants and LoginScreen references need verification

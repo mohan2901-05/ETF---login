@@ -1,0 +1,10 @@
+{
+  "name": "ETF Loans",
+  "short_name": "ETF Loans",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#F4F7F4",
+  "theme_color": "#0A2E1B",
+  "description": "ETF Loans mobile login",
+  "orientation": "portrait-primary"
+}

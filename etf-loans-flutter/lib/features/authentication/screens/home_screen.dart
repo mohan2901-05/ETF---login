@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:etf_loans/core/constants/app_routes.dart';
 import 'package:etf_loans/features/authentication/services/authentication_service.dart';
 import 'package:etf_loans/core/network/network_service.dart';
 import 'package:etf_loans/theme/theme_config.dart';
@@ -71,7 +72,10 @@ class _HomeScreenState extends State<HomeScreen> {
       await _authService.logout();
       await _secureStorage.delete(key: 'accessToken');
       if (mounted) {
-        Navigator.popUntil(context, (route) => route.isFirst);
+        Navigator.popUntil(
+          context,
+          (route) => route.settings.name == AppRoutes.signIn || route.isFirst,
+        );
       }
     } catch (e) {
       if (mounted) {

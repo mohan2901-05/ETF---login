@@ -175,7 +175,7 @@ class MockAuthenticationService extends AuthenticationService {
   /// Mock-only implementation that returns fabricated test-user data.
   /// Does not invoke the real REST endpoint or make HTTP requests.
   @override
-  Future<UserProfile> getUserProfile() async {
+  Future<UserProfile> getUserProfile({required String accessToken}) async {
     return UserProfile(
       id: 'dev-user-${_mockUserId ?? 0}',
       mobileNumber: _mockMobileNumber ?? '+919876512345',

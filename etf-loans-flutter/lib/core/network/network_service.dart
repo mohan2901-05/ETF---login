@@ -9,43 +9,67 @@ class NetworkService {
 
   NetworkService({http.Client? client}) : _client = client ?? http.Client();
 
-  Future<Map<String, dynamic>> post(String endpoint, {Map<String, dynamic>? body}) async {
+  Future<Map<String, dynamic>> post(String endpoint, {Map<String, dynamic>? body, String? authToken}) async {
     final uri = Uri.parse('${Constants.baseUrl}$endpoint');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+    if (authToken != null && authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
     final response = await _send(() => _client.post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
           body: body == null ? null : json.encode(body),
         ));
 
     return _handleResponse(response);
   }
 
-  Future<Map<String, dynamic>> get(String endpoint) async {
+  Future<Map<String, dynamic>> get(String endpoint, {String? authToken}) async {
     final uri = Uri.parse('${Constants.baseUrl}$endpoint');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+    if (authToken != null && authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
     final response = await _send(() => _client.get(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
         ));
 
     return _handleResponse(response);
   }
 
-  Future<Map<String, dynamic>> put(String endpoint, {Map<String, dynamic>? body}) async {
+  Future<Map<String, dynamic>> put(String endpoint, {Map<String, dynamic>? body, String? authToken}) async {
     final uri = Uri.parse('${Constants.baseUrl}$endpoint');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+    if (authToken != null && authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
     final response = await _send(() => _client.put(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
           body: body == null ? null : json.encode(body),
         ));
 
     return _handleResponse(response);
   }
 
-  Future<Map<String, dynamic>> delete(String endpoint) async {
+  Future<Map<String, dynamic>> delete(String endpoint, {String? authToken}) async {
     final uri = Uri.parse('${Constants.baseUrl}$endpoint');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+    if (authToken != null && authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
     final response = await _send(() => _client.delete(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
         ));
 
     return _handleResponse(response);
@@ -76,6 +100,7 @@ class NetworkService {
       }
     } else {
       responseBody['error'] = _parseError(response.body);
+      responseBody['statusCode'] = response.statusCode;
     }
 
     return responseBody;

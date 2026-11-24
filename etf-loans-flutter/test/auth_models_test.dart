@@ -116,5 +116,50 @@ void main() {
       expect(decoded.email, null);
       expect(decoded.createdAt, null);
     });
+
+    test('fromJson with null name', () {
+      final json = {
+        'id': '3',
+        'mobileNumber': '+919876512347',
+        'name': null,
+        'email': 'nullname@example.com',
+        'createdAt': '2024-01-02',
+      };
+      final decoded = UserProfile.fromJson(json);
+      expect(decoded.id, '3');
+      expect(decoded.mobileNumber, '+919876512347');
+      expect(decoded.name, null);
+      expect(decoded.email, 'nullname@example.com');
+      expect(decoded.createdAt, '2024-01-02');
+    });
+
+    test('fromJson with missing name field', () {
+      final json = {
+        'id': '4',
+        'mobileNumber': '+919876512348',
+        'email': 'noname@example.com',
+      };
+      final decoded = UserProfile.fromJson(json);
+      expect(decoded.id, '4');
+      expect(decoded.mobileNumber, '+919876512348');
+      expect(decoded.name, null);
+      expect(decoded.email, 'noname@example.com');
+      expect(decoded.createdAt, null);
+    });
+
+    test('toJson with null name', () {
+      final model = UserProfile(
+        id: '5',
+        mobileNumber: '+919876512349',
+        name: null,
+        email: 'noname2@example.com',
+      );
+      final json = model.toJson();
+      expect(json['id'], '5');
+      expect(json['mobileNumber'], '+919876512349');
+      expect(json['name'], null);
+      expect(json['email'], 'noname2@example.com');
+      expect(json['createdAt'], null);
+    });
   });
 }

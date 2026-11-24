@@ -87,13 +87,13 @@ class VerifyUser {
   final String id;
   final String mobileNumber;
   final String? name;
-  final bool isNewUser;
+  final bool? isNewUser;
 
   VerifyUser({
     required this.id,
     required this.mobileNumber,
     this.name,
-    required this.isNewUser,
+    this.isNewUser,
   });
 
   factory VerifyUser.fromJson(Map<String, dynamic> json) =>
@@ -106,14 +106,14 @@ class VerifyUser {
 class UserProfile {
   final String id;
   final String mobileNumber;
-  final String name;
+  final String? name;
   final String? email;
   final String? createdAt;
 
   UserProfile({
     required this.id,
     required this.mobileNumber,
-    required this.name,
+    this.name,
     this.email,
     this.createdAt,
   });

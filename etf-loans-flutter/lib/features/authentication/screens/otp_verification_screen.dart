@@ -7,6 +7,8 @@ import 'package:etf_loans/features/authentication/services/mock_authentication_s
 import 'package:etf_loans/core/network/network_service.dart';
 import 'package:etf_loans/theme/theme_config.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:etf_loans/features/authentication/models/auth_models.dart';
+import 'package:etf_loans/features/authentication/screens/home_screen.dart';
 
 /// Interface for secure storage to allow test mocking.
 abstract class SecureStorage {
@@ -57,6 +59,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
   String? _statusMessage;
   int _resendCountdown = 0;
   bool _isResending = false;
+  bool _verificationInProgress = false;
 
   late final AnimationController _caretController;
   late final AnimationController _checkController;
@@ -176,7 +179,11 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
         }
       });
 
-      if (_otp.length == 6 && _state != OtpState.checking && _state != OtpState.success) {
+      // Trigger verification only when OTP is complete and not already verifying
+      if (_otp.length == 6 && 
+          _state != OtpState.checking && 
+          _state != OtpState.success && 
+          !_verificationInProgress) {
         _verifyOtp();
       }
     }
@@ -190,13 +197,14 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
   }
 
   Future<void> _verifyOtp() async {
-    if (_state == OtpState.checking || _state == OtpState.success) return;
+    if (_verificationInProgress || _state == OtpState.success) return;
     if (widget.challengeId == null) {
       _showError('Invalid session. Please request a new code.');
       return;
     }
 
     setState(() {
+      _verificationInProgress = true;
       _state = OtpState.checking;
     });
     _checkController.forward(from: 0);
@@ -216,6 +224,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
         _state = OtpState.success;
         _statusMessage = 'Verified';
         _successController.forward(from: 0);
+        _accessToken = response.accessToken;
         await _secureStorage.write(
           key: 'accessToken',
           value: response.accessToken ?? '',
@@ -252,6 +261,12 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
       _countdownController.reset();
       _resendCountdown = widget.resendAfterSeconds ?? 30;
       _countdownController.forward(from: 0);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _verificationInProgress = false;
+        });
+      }
     }
   }
 
@@ -299,8 +314,29 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
 
   void _navigateToSuccess() {
     if (!mounted) return;
-    Navigator.popUntil(context, (route) => route.isFirst);
+    
+    // Create a minimal UserProfile from the verification response data
+    // We have the mobile number, and the token. We'll fetch the full profile in HomeScreen.
+    final userProfile = UserProfile(
+      id: '', // Will be fetched in HomeScreen
+      mobileNumber: widget.mobileNumber,
+      name: '',
+      email: null,
+      createdAt: null,
+    );
+    
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => HomeScreen(
+          initialUser: userProfile,
+          initialToken: _accessToken,
+        ),
+      ),
+    );
   }
+
+  String? _accessToken;
 
   void _goBackToLogin() {
     Navigator.pop(context);
@@ -512,7 +548,29 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
-
+        
+        // Calculate responsive tile size based on available width
+        // 6 tiles + 5 gaps = total width
+        // tileSize * 6 + tileGap * 5 <= maxWidth
+        // tileSize = (maxWidth - tileGap * 5) / 6
+        const tileCount = 6;
+        const gapCount = tileCount - 1;
+        const minTileSize = 44.0;
+        const minGap = 6.0;
+        
+        double calculatedTileSize = tileSize;
+        double calculatedGap = tileGap;
+        double calculatedFontSize = digitFontSize;
+        
+        // If fixed size doesn't fit, calculate responsive size
+        final fixedWidth = tileSize * tileCount + tileGap * gapCount;
+        if (fixedWidth > maxWidth) {
+          calculatedGap = minGap;
+          calculatedTileSize = ((maxWidth - calculatedGap * gapCount) / tileCount).clamp(minTileSize, tileSize);
+          // Scale font size proportionally
+          calculatedFontSize = (digitFontSize * (calculatedTileSize / tileSize)).clamp(20.0, digitFontSize);
+        }
+        
         return SizedBox(
           width: maxWidth,
           child: Row(
@@ -547,9 +605,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
                     successAnimation: _successTileAnimations[index],
                     caretController: _caretController,
                     checkController: _checkController,
-                    tileSize: tileSize,
-                    digitFontSize: digitFontSize,
-                    tileGap: tileGap,
+                    tileSize: calculatedTileSize,
+                    digitFontSize: calculatedFontSize,
+                    tileGap: calculatedGap,
                   );
                 },
               );

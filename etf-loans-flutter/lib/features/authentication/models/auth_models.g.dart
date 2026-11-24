@@ -75,7 +75,7 @@ VerifyUser _$VerifyUserFromJson(Map<String, dynamic> json) => VerifyUser(
   id: json['id'] as String,
   mobileNumber: json['mobileNumber'] as String,
   name: json['name'] as String?,
-  isNewUser: json['isNewUser'] as bool,
+  isNewUser: json['isNewUser'] as bool?,
 );
 
 Map<String, dynamic> _$VerifyUserToJson(VerifyUser instance) =>
@@ -89,7 +89,7 @@ Map<String, dynamic> _$VerifyUserToJson(VerifyUser instance) =>
 UserProfile _$UserProfileFromJson(Map<String, dynamic> json) => UserProfile(
   id: json['id'] as String,
   mobileNumber: json['mobileNumber'] as String,
-  name: json['name'] as String,
+  name: json['name'] as String?,
   email: json['email'] as String?,
   createdAt: json['createdAt'] as String?,
 );

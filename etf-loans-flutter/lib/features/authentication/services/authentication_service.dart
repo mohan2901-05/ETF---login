@@ -61,13 +61,21 @@ class AuthenticationService {
     }
   }
 
-  Future<UserProfile> getUserProfile() async {
+  Future<UserProfile> getUserProfile({required String accessToken}) async {
     try {
-      final response = await _networkService.get(Constants.me);
+      final response = await _networkService.get(Constants.me, authToken: accessToken);
 
       if (response['statusCode'] >= 200 && response['statusCode'] < 300) {
         final userData = response['data'] as Map<String, dynamic>;
         return UserProfile.fromJson(userData);
+      }
+
+      // Handle authentication failures specifically
+      if (response['statusCode'] == 401) {
+        throw ServerException('Session expired. Please log in again.');
+      }
+      if (response['statusCode'] == 403) {
+        throw ServerException('Access denied. Invalid session.');
       }
 
       throw ServerException(

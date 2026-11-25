@@ -22,7 +22,7 @@ public class AuthenticationEnvironment {
     }
 
     static void validate(Environment environment) {
-        boolean local = environment.acceptsProfiles(Profiles.of("local & !test & !prod & !production"));
+        boolean local = isLocal(environment);
         boolean test = environment.acceptsProfiles(Profiles.of("test & !local & !prod & !production"));
         boolean mock = environment.getProperty("etf.otp.mock-enabled", Boolean.class, false);
         boolean demo = environment.getProperty("etf.demo.enabled", Boolean.class, false);
@@ -57,6 +57,21 @@ public class AuthenticationEnvironment {
                 || usesDevelopmentDatabase(environment.getProperty("spring.flyway.url", ""))) {
             throw new IllegalStateException("Development profiles and authentication databases cannot be shared with other environments");
         }
+    }
+
+    public static long otpCooldownSeconds(Environment environment, long standardSeconds) {
+        if (!isLocal(environment) || !environment.getProperty("etf.otp.mock-enabled", Boolean.class, false)) {
+            return standardSeconds;
+        }
+        int seconds = environment.getProperty("etf.otp.local-cooldown-seconds", Integer.class, 10);
+        if (seconds < 1) {
+            throw new IllegalArgumentException("Local OTP cooldown must be positive");
+        }
+        return seconds;
+    }
+
+    private static boolean isLocal(Environment environment) {
+        return environment.acceptsProfiles(Profiles.of("local & !test & !prod & !production"));
     }
 
     private static boolean isolatedPostgres(String url, String database) {

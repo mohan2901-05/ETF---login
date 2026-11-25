@@ -99,7 +99,12 @@ class NetworkService {
         responseBody['data'] = response.body;
       }
     } else {
-      responseBody['error'] = _parseError(response.body);
+      final retryAfter = int.tryParse(response.headers['retry-after'] ?? '');
+      responseBody['error'] = response.statusCode == 429 &&
+              retryAfter != null &&
+              retryAfter > 0
+          ? 'Too many requests. Try again in $retryAfter seconds.'
+          : _parseError(response.body);
       responseBody['statusCode'] = response.statusCode;
     }
 

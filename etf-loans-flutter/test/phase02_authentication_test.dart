@@ -51,6 +51,18 @@ class _NoSessionStorage implements SecureStorage {
 }
 
 void main() {
+  test('HTTP 429 uses Retry-After seconds for the authentication error', () async {
+    final client = MockClient((_) async => http.Response(
+      '{"message":"Generic server error"}',
+      429,
+      headers: {'Retry-After': '10'},
+    ));
+    final network = NetworkService(client: client);
+    addTearDown(network.close);
+    final response = await network.post('/api/auth/password/login/start');
+    expect(response['error'], 'Too many requests. Try again in 10 seconds.');
+  });
+
   for (final valid in [false, true]) {
     testWidgets(
       valid

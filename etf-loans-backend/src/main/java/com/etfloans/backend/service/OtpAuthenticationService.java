@@ -1,5 +1,7 @@
 package com.etfloans.backend.service;
 
+import com.etfloans.backend.config.AuthenticationEnvironment;
+
 import com.etfloans.backend.model.Users;
 import com.etfloans.backend.model.OtpPurpose;
 import com.etfloans.backend.model.PasswordGrant;
@@ -180,8 +182,9 @@ public class OtpAuthenticationService {
         if (purpose == OtpPurpose.PASSWORD_LOGIN && !previous.getExpiresAt().isAfter(now)) {
             throw new IllegalArgumentException("Sign in again to request a verification code.");
         }
-        if (previous.getCreatedAt().plusSeconds(resendCooldownSeconds).isAfter(now)) {
-            throw new IllegalArgumentException("Please wait before resending.");
+        Duration remaining = Duration.between(now, previous.getCreatedAt().plusSeconds(resendDelaySeconds()));
+        if (!remaining.isNegative() && !remaining.isZero()) {
+            throw new RateLimitExceededException(remaining.getSeconds() + (remaining.getNano() == 0 ? 0 : 1));
         }
         previous.setConsumedAt(now);
         Users user = usersRepository.findByMobileNumber(mobile).orElse(null);
@@ -351,7 +354,7 @@ public class OtpAuthenticationService {
     }
 
     public int resendDelaySeconds() {
-        return Math.toIntExact(resendCooldownSeconds);
+        return Math.toIntExact(AuthenticationEnvironment.otpCooldownSeconds(environment, resendCooldownSeconds));
     }
 
     public int sessionExpirySeconds() {

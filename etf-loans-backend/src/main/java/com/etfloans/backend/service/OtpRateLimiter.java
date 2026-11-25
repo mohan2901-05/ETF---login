@@ -1,6 +1,8 @@
 package com.etfloans.backend.service;
 
+import com.etfloans.backend.config.AuthenticationEnvironment;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -30,14 +32,15 @@ public class OtpRateLimiter {
             @Value("${etf.otp.send-window-seconds:900}") long sendWindowSeconds,
             @Value("${etf.otp.verify-limit:10}") int verifyLimit,
             @Value("${etf.otp.verify-window-seconds:900}") long verifyWindowSeconds,
-            @Value("${etf.otp.max-buckets:10000}") int maxBuckets) {
+            @Value("${etf.otp.max-buckets:10000}") int maxBuckets,
+            Environment environment) {
         if (sendLimit < 1 || sendWindowSeconds < 1 || verifyLimit < 1 || verifyWindowSeconds < 1 || maxBuckets < 1) {
             throw new IllegalArgumentException("Authentication rate limits must be positive");
         }
         this.sendLimit = sendLimit;
-        this.sendWindowSeconds = sendWindowSeconds;
+        this.sendWindowSeconds = AuthenticationEnvironment.otpCooldownSeconds(environment, sendWindowSeconds);
         this.verifyLimit = verifyLimit;
-        this.verifyWindowSeconds = verifyWindowSeconds;
+        this.verifyWindowSeconds = AuthenticationEnvironment.otpCooldownSeconds(environment, verifyWindowSeconds);
         this.maxBuckets = maxBuckets;
     }
 

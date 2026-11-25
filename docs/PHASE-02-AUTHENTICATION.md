@@ -31,6 +31,8 @@ Grants contain 256 bits of randomness, expire in **five minutes**, and are store
 
 ## Local device testing
 
+With the isolated local profile and mock OTP enabled, send and verify quotas use a 10-second window and resend uses a 10-second cooldown. Set `ETF_LOCAL_OTP_COOLDOWN_SECONDS` to a positive integer to change all three. Production retains the 900-second send and verify windows and 30-second resend cooldown.
+
 Provision a separate loopback PostgreSQL database named `etf_loans_device` with synthetic accounts only. Apply the unchanged migrations as an approved, separate step. Set `ETF_DEVICE_DB_URL` to `jdbc:postgresql://127.0.0.1:<port>/etf_loans_device`. Supply its credentials through `ETF_DEVICE_DB_USERNAME` and `ETF_DEVICE_DB_PASSWORD`, and set a separate random `ETF_DEV_OTP_KEY` of at least 32 characters. Set `$otp` to a six-digit local mock code in your console. Run `.\start-local-dev.ps1 -SyntheticAccountsOnly -MockOtpCode $otp`. The launcher disables startup migrations and Hibernate validates the installed schema. It refuses to reuse a backend already listening on port 8080. Use USB ADB reverse for loopback development.
 
 Keep local and test databases, keys and tokens separate from all shared and production environments. Older backend versions must never access the V2 authentication database. They do not enforce V2 password and OTP-purpose checks. Before deploying outside development, confirm the intern team's API and database contract, enforce HTTPS, configure a real SMS provider and verify that provider timing preserves account enumeration protections. A shared throttle is required before running multiple instances. The local limiter has bounded per-instance storage and its counters reset on restart.

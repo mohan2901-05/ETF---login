@@ -54,6 +54,18 @@ class OtpFlowTests {
     private static final String TEST_PASSWORD = "fixture-only-password";
 
     @Test
+    void earlyResendReportsTheRemainingCooldown() throws Exception {
+        String mobile = "9100000024";
+        String id = send(mobile);
+        var response = authRequest("/otp/resend", Map.of("mobileNumber", mobile, "challengeId", id)).getResponse();
+        assertEquals(429, response.getStatus());
+        long seconds = Long.parseLong(response.getHeader("Retry-After"));
+        assertTrue(seconds > 0 && seconds <= 30);
+        assertEquals("Too many requests. Try again in " + seconds + " seconds.",
+                objectMapper.readTree(response.getContentAsString()).path("message").asText());
+    }
+
+    @Test
     void incorrectAttemptPersistsAndConcurrentOtpCanSucceedOnlyOnce() throws Exception {
         String mobile = "9100000001";
         String id = send(mobile);

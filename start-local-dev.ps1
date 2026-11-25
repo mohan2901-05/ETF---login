@@ -1,172 +1,141 @@
-# ETF Loans - Local development startup (Windows PowerShell 5.1+)
-# The script does not install dependencies, modify the database, or store secrets.
+# Start the isolated synthetic Windows backend and connect a physical phone.
 [CmdletBinding()]
 param(
     [string]$DeviceSerial,
-    [string]$MockOtpCode = $env:ETF_OTP_MOCK_CODE,
-    [string]$Maven = (Join-Path $env:LOCALAPPDATA 'Programs\apache-maven-3.9.6\bin\mvn.cmd'),
-    [string]$Adb = (Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'),
-    [string]$PgIsReady = (Join-Path $env:ProgramFiles 'PostgreSQL\18\bin\pg_isready.exe'),
+    [string]$MockOtpCode,
+    [string]$Maven,
+    [string]$Adb,
+    [string]$PgIsReady,
+    [string]$Credentials,
+    [ValidateRange(1, 3600)][int]$CooldownSeconds = 10,
+    [ValidateRange(5, 300)][int]$StartupTimeoutSeconds = 75,
     [switch]$SkipPhone,
+    [switch]$HideOtp,
     [switch]$SyntheticAccountsOnly
 )
-
 $ErrorActionPreference = 'Stop'
-$projectRoot = $PSScriptRoot
-$backendDir = Join-Path $projectRoot 'etf-loans-backend'
-$mavenCmd = $Maven
-$adbExe = $Adb
-$pgReady = $PgIsReady
-$healthUrl = 'http://127.0.0.1:8080/api/health'
+. "$PSScriptRoot\local-dev-tools.ps1"
 
-function Show-Step([string]$message) {
-    Write-Host "`n== $message ==" -ForegroundColor Cyan
-}
-
-function Test-BackendHealth {
-    try {
-        $result = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 3
-        return ($result.status -eq 'up')
-    } catch {
-        return $false
-    }
-}
-
-function Import-RequiredEnvironment([string]$name) {
-    $value = [Environment]::GetEnvironmentVariable($name, 'Process')
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        $value = [Environment]::GetEnvironmentVariable($name, 'User')
-    }
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        $value = [Environment]::GetEnvironmentVariable($name, 'Machine')
-    }
-    if ([string]::IsNullOrWhiteSpace($value)) {
-        throw "Missing $name. Configure it in your Windows user environment or current PowerShell session. No credentials were changed."
-    }
-    [Environment]::SetEnvironmentVariable($name, $value, 'Process')
-    Write-Host "  $name : configured"
-}
-
-if (-not (Test-Path -LiteralPath $backendDir -PathType Container)) {
-    throw "Backend directory not found: $backendDir. Place this script in your ETF Loans project root."
-}
-if (-not (Test-Path -LiteralPath $mavenCmd -PathType Leaf)) {
-    throw "Maven not found: $mavenCmd"
-}
-if ($MockOtpCode -notmatch '^\d{6}$') {
-    throw 'Supply a six-digit local mock OTP via -MockOtpCode or ETF_OTP_MOCK_CODE.'
-}
-
-if (-not $SyntheticAccountsOnly) {
-    throw 'Confirm the isolated device database contains only synthetic data with -SyntheticAccountsOnly.'
-}
-foreach ($name in @('ETF_DEVICE_DB_URL', 'ETF_DEVICE_DB_USERNAME', 'ETF_DEVICE_DB_PASSWORD', 'ETF_DEV_OTP_KEY')) {
-    Import-RequiredEnvironment $name
-}
-if ($env:ETF_DEVICE_DB_URL -notmatch '^jdbc:postgresql://127\.0\.0\.1:([0-9]{1,5})/etf_loans_device$') {
-    throw 'ETF_DEVICE_DB_URL must target etf_loans_device on IPv4 loopback.'
-}
-$dbPort = [int]$Matches[1]
-if ($dbPort -lt 1 -or $dbPort -gt 65535) { throw 'Invalid device database port.' }
-if ($env:ETF_DEV_OTP_KEY.Length -lt 32 -or $env:ETF_DEV_OTP_KEY -ceq $env:ETF_OTP_KEY) {
-    throw 'Configure a separate strong device-testing OTP key.'
-}
-
-Show-Step 'Check isolated PostgreSQL'
-if (-not (Test-Path -LiteralPath $pgReady -PathType Leaf)) {
-    throw "PostgreSQL utility not found: $pgReady"
-}
-$ready = $false
-for ($i = 0; $i -lt 12; $i++) {
-    & $pgReady -h 127.0.0.1 -p $dbPort | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        $ready = $true
-        break
-    }
-    Start-Sleep -Seconds 2
-}
-if (-not $ready) {
-    throw 'The isolated PostgreSQL instance is not accepting connections on its configured port.'
-}
-Write-Host '  PostgreSQL is accepting loopback connections on the device database port.' -ForegroundColor Green
-
-Show-Step 'Configure local Spring Boot authentication'
-$env:SPRING_FLYWAY_ENABLED = 'false'
-$env:ETF_OTP_MOCK_CODE = $MockOtpCode
-$env:ETF_OTP_MOCK_ENABLED = 'true'
-$env:ETF_DEMO_ENABLED = 'false'
-$env:CORS_ALLOWED_ORIGINS = 'http://127.0.0.1:8080'
-Write-Host '  Local mock OTP configured; demo mode disabled.'
-Write-Host '  No database password, HMAC key, or session token is written to this script.'
-
-Show-Step 'Check Spring Boot'
-if (Test-BackendHealth) {
-    throw 'Port 8080 already has a backend. Stop it before launching the isolated device backend.'
-} else {
-    $portInUse = $false
-    try {
-        $tcp = [System.Net.Sockets.TcpClient]::new()
+$lock = Enter-DevLock
+try {
+    $process = Get-DevBackend
+    if ($process) {
+        if ($process.ProcessName -ine 'java') { throw 'Stop the tracked legacy backend, then run start again.' }
+        if (!(Test-DevHealth)) {
+            throw "The workspace backend is running but unhealthy. Check $DevData\backend.err.log and backend.out.log before stopping it."
+        }
+        Write-Host 'Reusing the healthy workspace backend.'
+        if (!$HideOtp) {
+            $state = Get-Content -LiteralPath $DevState -Raw | ConvertFrom-Json
+            if ($state.mockOtp) {
+                $otp = ConvertTo-SecureString -String $state.mockOtp
+                Write-Host "Synthetic development OTP for this session: $([Net.NetworkCredential]::new('', $otp).Password)"
+            }
+        }
+    } else {
+        if (Test-DevPort) { throw 'Port 8080 is occupied by a process outside this launcher. Identify it before retrying.' }
+        if (!$Credentials) { $Credentials = Join-Path $DevData 'device.local.clixml' }
+        if (!(Test-Path -LiteralPath $Credentials -PathType Leaf)) {
+            throw 'Encrypted device credentials are missing. Copy the existing device.local.clixml into .local-dev under this Windows account.'
+        }
         try {
-            $attempt = $tcp.BeginConnect('127.0.0.1', 8080, $null, $null)
-            if ($attempt.AsyncWaitHandle.WaitOne(800)) {
-                $tcp.EndConnect($attempt)
-                $portInUse = $true
+            $device = Import-Clixml -LiteralPath $Credentials
+            if ($device.password -isnot [Security.SecureString] -or $device.key -isnot [Security.SecureString]) {
+                throw 'Expected DPAPI-protected credentials.'
+            }
+            $password = [Net.NetworkCredential]::new('', $device.password).Password
+            $key = [Net.NetworkCredential]::new('', $device.key).Password
+        } catch {
+            throw 'Could not decrypt device credentials. Use the same Windows account and computer that exported the file.'
+        }
+        if ($device.url -notmatch '^jdbc:postgresql://127\.0\.0\.1:([0-9]{1,5})/etf_loans_device$') {
+            throw 'The encrypted configuration must target etf_loans_device on IPv4 loopback.'
+        }
+        $dbPort = [int]$Matches[1]
+        if ($dbPort -lt 1 -or $dbPort -gt 65535 -or !$device.username -or !$password -or
+            $key.Length -lt 32 -or $key -ceq $env:ETF_OTP_KEY) {
+            throw 'The isolated database credentials or separate development key are invalid.'
+        }
+        $pg = Resolve-DevTool $PgIsReady 'pg_isready.exe' @((Join-Path $env:ProgramFiles 'PostgreSQL\18\bin\pg_isready.exe'))
+        & $pg -q -h 127.0.0.1 -p $dbPort -t 2
+        if ($LASTEXITCODE -ne 0) { throw "Isolated PostgreSQL is unavailable on loopback port $dbPort. Check that the installed PostgreSQL Windows service is running." }
+        $mavenHome = if ($env:MAVEN_HOME) { Join-Path $env:MAVEN_HOME 'bin\mvn.cmd' }
+        $mvn = Resolve-DevTool $Maven 'mvn.cmd' @($mavenHome, (Join-Path $env:LOCALAPPDATA 'Programs\apache-maven-3.9.6\bin\mvn.cmd'))
+        if (!$MockOtpCode) { $MockOtpCode = [string](Get-Random -Minimum 100000 -Maximum 1000000) }
+        if ($MockOtpCode -cnotmatch '^[0-9]{6}$') { throw 'The local development OTP must contain six digits.' }
+        $javaHome = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin\java.exe' }
+        $java = Resolve-DevTool $javaHome 'java.exe' @()
+        $backend = Join-Path $DevRoot 'etf-loans-backend'
+        $jar = Get-DevBackendJar $backend $mvn
+
+        $childEnv = @{
+            ETF_DEVICE_DB_URL = $device.url; ETF_DEVICE_DB_USERNAME = $device.username
+            ETF_DEVICE_DB_PASSWORD = $password; ETF_DEV_OTP_KEY = $key
+            ETF_OTP_MOCK_CODE = $MockOtpCode; ETF_LOCAL_OTP_COOLDOWN_SECONDS = [string]$CooldownSeconds
+            CORS_ALLOWED_ORIGINS = 'http://127.0.0.1:8080'
+            SPRING_DATASOURCE_URL = $null; SPRING_DATASOURCE_USERNAME = $null; SPRING_DATASOURCE_PASSWORD = $null
+        }
+        $previous = @{}
+        $arguments = @('-jar', ('"' + $jar + '"'), '--spring.profiles.active=local',
+            '--server.address=127.0.0.1', '--server.port=8080',
+            '--spring.flyway.enabled=false', '--spring.jpa.hibernate.ddl-auto=validate',
+            '--etf.otp.mock-enabled=true', '--etf.demo.enabled=false')
+        try {
+            foreach ($name in $childEnv.Keys) {
+                $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+                [Environment]::SetEnvironmentVariable($name, $childEnv[$name], 'Process')
+            }
+            if (Test-DevPort) { throw 'Port 8080 was occupied during packaging. No backend was launched.' }
+            for ($attempt = 1; $attempt -le 2; $attempt++) {
+                try {
+                    $process = Start-Process -WindowStyle Hidden -PassThru -FilePath $java `
+                        -ArgumentList $arguments -WorkingDirectory $backend `
+                        -RedirectStandardOutput (Join-Path $DevData 'backend.out.log') `
+                        -RedirectStandardError (Join-Path $DevData 'backend.err.log')
+                    break
+                } catch {
+                    if ($attempt -eq 2 -or (Test-DevPort)) { throw }
+                    Write-Warning 'Windows could not start the Java process. Retrying once.'
+                }
             }
         } finally {
-            $tcp.Close()
-        }
-    } catch { }
-    if ($portInUse) {
-        throw 'Port 8080 is in use, but /api/health is not healthy. Check the existing process rather than starting a duplicate backend.'
-    }
-
-    # Start backend in a separate PowerShell window, inheriting this process's
-    # environment variables (including any existing DB secrets). No credentials
-    # or commands containing credentials are embedded in the command line.
-    $launchCommand = @'
-$ErrorActionPreference = 'Stop'
-Set-Location -LiteralPath '__BACKEND_DIR__'
-$maven = '__MAVEN_CMD__'
-Write-Host 'ETF Loans backend: local profile (leave this window open)' -ForegroundColor Cyan
-& $maven spring-boot:run '-Dspring-boot.run.profiles=local' '-Dspring-boot.run.arguments=--spring.flyway.enabled=false'
-Write-Host 'Spring Boot exited. Review the messages above.' -ForegroundColor Yellow
-'@
-    $launchCommand = $launchCommand.Replace('__BACKEND_DIR__', $backendDir.Replace("'", "''"))
-    $launchCommand = $launchCommand.Replace('__MAVEN_CMD__', $mavenCmd.Replace("'", "''"))
-    $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($launchCommand))
-    Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-EncodedCommand', $encodedCommand) -WorkingDirectory $backendDir | Out-Null
-    Write-Host '  Started the isolated local Spring Boot process.'
-    Write-Host "  Health check once startup completes: $healthUrl"
-}
-
-if (-not $SkipPhone) {
-    Show-Step 'Connect an Android device via ADB reverse'
-    if (-not (Test-Path -LiteralPath $adbExe -PathType Leaf)) {
-        Write-Warning "ADB not found at $adbExe. Connect the phone and run ADB reverse manually."
-    } else {
-        $devices = @(& $adbExe devices)
-        if (-not $DeviceSerial) {
-            $online = @($devices | Where-Object { $_ -match '^\S+\s+device(?:\s|$)' })
-            if ($online.Count -eq 1) { $DeviceSerial = ($online[0] -split '\s+')[0] }
-        }
-        $deviceReady = ($devices | Where-Object { $_ -match ('^' + [regex]::Escape($DeviceSerial) + '\s+device(?:\s|$)') }).Count -gt 0
-        if (-not $deviceReady) {
-            Write-Warning 'Select an online device with -DeviceSerial, or connect one device with USB debugging enabled.'
-        } else {
-            & $adbExe -s $DeviceSerial reverse tcp:8080 tcp:8080
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host '  USB reverse: phone localhost:8080 -> laptop localhost:8080' -ForegroundColor Green
-                & $adbExe -s $DeviceSerial reverse --list
-            } else {
-                Write-Warning 'ADB reverse failed. Check the USB connection.'
+            foreach ($name in $previous.Keys) {
+                [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
             }
         }
+        if ($process.HasExited) { throw "Backend exited during launch. Check $DevData\backend.err.log and backend.out.log." }
+        $protectedOtp = ConvertFrom-SecureString (ConvertTo-SecureString $MockOtpCode -AsPlainText -Force)
+        @{workspace=$DevRoot; pid=$process.Id; executable=$java; started=$process.StartTime.ToUniversalTime().Ticks.ToString(); mockOtp=$protectedOtp} |
+            ConvertTo-Json | Set-Content -LiteralPath $DevState
+        $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+        $healthy = $false
+        do {
+            if ($process.HasExited) { break }
+            if (Test-DevHealth) { $healthy = $true; break }
+            Start-Sleep -Seconds 1
+        } while ([DateTime]::UtcNow -lt $deadline)
+        if (!$healthy) {
+            if ($process.HasExited) {
+                $process.WaitForExit()
+                Remove-Item -LiteralPath $DevState
+                $startupLog = Join-Path $DevData 'backend.out.log'
+                if (Select-String -LiteralPath $startupLog -Pattern 'the database system is in recovery mode' -Quiet) {
+                    throw "PostgreSQL entered recovery during backend startup. Wait until it accepts connections and retry. See $startupLog."
+                }
+                $reason = 'exited before health was available'
+                if ($null -ne $process.ExitCode) { $reason += " (exit $($process.ExitCode))" }
+            } else { $reason = 'did not become healthy before the timeout' }
+            throw "Workspace backend $reason. Inspect $DevData\backend.err.log and backend.out.log. Use stop-local-dev.ps1 before retrying a running process."
+        }
+        Write-Host "Workspace backend is healthy. Local OTP cooldown: $CooldownSeconds seconds."
+        if (!$HideOtp) { Write-Host "Synthetic development OTP for this session: $MockOtpCode" }
     }
-}
-
-Show-Step 'Ready for local testing'
-Write-Host '  1. Confirm Spring Boot health on the laptop.'
-Write-Host "  2. Open $healthUrl in Chrome on the phone."
-Write-Host '  3. Open the already-installed ETF Loans app; send a NEW OTP challenge.'
-Write-Host '  4. Use the local development OTP you supplied. Verify HomeScreen and logout.'
-Write-Host '  Note: USB reverse must be restored after reconnection or ADB restart.'
+    if (!$SkipPhone) {
+        try {
+            $adbPath = Get-DevAdb $Adb
+            $serial = Get-DevDevice $adbPath $DeviceSerial
+            Set-DevReverse $adbPath $serial
+            Write-Host "ADB reverse is ready for $serial."
+        } catch { Write-Warning $_.Exception.Message }
+    }
+} finally { $lock.Dispose() }

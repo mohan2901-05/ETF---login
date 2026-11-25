@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ETF: Start local backend and connect phone",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}\\start-local-dev.ps1"],
+      "problemMatcher": []
+    },
+    {
+      "label": "ETF: Build and install ARM64 debug APK",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}\\build-install.ps1"],
+      "problemMatcher": []
+    },
+    {
+      "label": "ETF: Install existing APK",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}\\build-install.ps1", "-InstallOnly"],
+      "problemMatcher": []
+    },
+    {
+      "label": "ETF: Stop local backend",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}\\stop-local-dev.ps1"],
+      "problemMatcher": []
+    }
+  ]
+}

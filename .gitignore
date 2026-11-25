@@ -1,6 +1,7 @@
 /etf-loans-backend/target/
 /etf-loans-flutter/android/build/
 /phase02-verification/
+/.local-dev/
 /test_pg.bat
 /docs/references/
 *.apk

@@ -99,7 +99,15 @@ class NetworkService {
         responseBody['data'] = response.body;
       }
     } else {
-      final retryAfter = int.tryParse(response.headers['retry-after'] ?? '');
+      int? retryAfter;
+      if (response.statusCode == 429) {
+        for (final header in response.headers.entries) {
+          if (header.key.toLowerCase() == 'retry-after') {
+            retryAfter = int.tryParse(header.value.trim());
+            break;
+          }
+        }
+      }
       responseBody['error'] = response.statusCode == 429 &&
               retryAfter != null &&
               retryAfter > 0

@@ -6,15 +6,26 @@ import 'package:etf_loans/core/network/network_service.dart';
 import 'package:etf_loans/theme/theme_config.dart';
 import 'package:etf_loans/features/authentication/models/auth_models.dart';
 import 'package:etf_loans/core/errors/app_errors.dart';
+import 'package:etf_loans/features/eligibility/eligibility_flow.dart';
+import 'package:etf_loans/features/eligibility/eligibility_models.dart';
+import 'package:etf_loans/features/eligibility/eligibility_service.dart';
+import 'package:etf_loans/features/onboarding/borrower_details.dart';
+import 'package:etf_loans/features/onboarding/borrower_flow.dart';
+import 'package:etf_loans/features/onboarding/borrower_service.dart';
+import 'package:etf_loans/shared/widgets/custom_widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserProfile? initialUser;
   final String? initialToken;
+  final BorrowerService borrowerService;
+  final EligibilityService eligibilityService;
 
   const HomeScreen({
     this.initialUser,
     this.initialToken,
+    this.borrowerService = const UnavailableBorrowerService(),
+    this.eligibilityService = const UnavailableEligibilityService(),
     super.key,
   });
 
@@ -30,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _accessToken;
   bool _isLoading = true;
   bool _isSigningOut = false;
+  bool _openingBorrowerFlow = false;
   String? _errorMessage;
 
   @override
@@ -92,6 +104,87 @@ class _HomeScreenState extends State<HomeScreen> {
       return foundSignIn || route.isFirst;
     });
     if (!foundSignIn) navigator.pushNamed(AppRoutes.signIn);
+  }
+
+  Future<void> _openBorrowerFlow({required bool update}) async {
+    final token = _accessToken;
+    final user = _user;
+    if (_openingBorrowerFlow ||
+        _isSigningOut ||
+        user == null ||
+        token == null ||
+        token.isEmpty) {
+      return;
+    }
+
+    setState(() => _openingBorrowerFlow = true);
+    try {
+      final result = await _pushBorrowerDetails(
+        update: update,
+        token: token,
+        accountName: user.name,
+      );
+      if (!mounted || result == null) return;
+      if (result == BorrowerFlowResult.sessionExpired) {
+        await _expireBorrowerSession(token);
+        return;
+      }
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: '/checking'),
+          builder: (_) => EligibilityFlow(
+            accessToken: token,
+            borrowerName: user.name,
+            initialKind: result == BorrowerFlowResult.checkEligibility
+                ? EligibilityCheckKind.initial
+                : EligibilityCheckKind.recheck,
+            service: widget.eligibilityService,
+            openUpdateDetails: () => _pushBorrowerDetails(
+              update: true,
+              token: token,
+              accountName: user.name,
+            ),
+            onSessionExpired: () => _expireBorrowerSession(token),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _openingBorrowerFlow = false);
+    }
+  }
+
+  Future<BorrowerFlowResult?> _pushBorrowerDetails({
+    required bool update,
+    required String token,
+    required String? accountName,
+  }) {
+    return Navigator.of(context).push<BorrowerFlowResult>(
+      MaterialPageRoute(
+        settings: RouteSettings(name: update ? '/update' : '/details'),
+        builder: (_) => BorrowerFlow(
+          accessToken: token,
+          openUpdate: update,
+          accountName: accountName,
+          service: widget.borrowerService,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _expireBorrowerSession(String token) async {
+    if (_accessToken != token) return;
+    setState(() {
+      _accessToken = null;
+      _user = null;
+    });
+    try {
+      if (await _secureStorage.read(key: 'accessToken') == token) {
+        await _secureStorage.delete(key: 'accessToken');
+      }
+    } catch (_) {
+      // A storage failure does not make an expired session usable.
+    }
+    if (mounted) _returnToSignIn();
   }
 
   @override
@@ -232,10 +325,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildActionButtons() {
+    final actionsEnabled = !_isSigningOut && !_openingBorrowerFlow;
+    final borrowerActionsEnabled = actionsEnabled && (_accessToken?.isNotEmpty ?? false);
     return Column(
       children: [
+        OutlineButton(
+          title: 'Personal details',
+          onPressed: () => _openBorrowerFlow(update: false),
+          enabled: borrowerActionsEnabled,
+        ),
+        const SizedBox(height: 16),
         ElevatedButton.icon(
-          onPressed: _isSigningOut ? null : _logout,
+          onPressed: actionsEnabled ? _logout : null,
           icon: const Icon(Icons.logout_rounded, size: 20),
           label: const Text('Logout'),
           style: ElevatedButton.styleFrom(
@@ -250,9 +351,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ).animate().fadeIn(duration: 400.ms, delay: 300.ms).slideY(begin: 0.1, end: 0, duration: 400.ms),
         const SizedBox(height: 16),
         TextButton(
-          onPressed: () {
-            // Navigate to profile/settings if needed
-          },
+          onPressed: borrowerActionsEnabled
+              ? () => _openBorrowerFlow(update: true)
+              : null,
           style: TextButton.styleFrom(
             foregroundColor: ThemeConfig.primaryGreen,
             padding: const EdgeInsets.symmetric(vertical: 12),

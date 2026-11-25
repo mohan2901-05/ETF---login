@@ -30,11 +30,11 @@ Some entries may become dialogs or reusable views rather than standalone routes.
 | ETF-007 | Auth | Set password | Internally accepted on POCO F4 |
 | ETF-008 | Auth | Forgot password | Internally accepted on POCO F4 |
 | ETF-009 | Auth | Set new password | Internally accepted on POCO F4 |
-| ETF-010 | Onboarding | Personal details | Full reference pending |
-| ETF-011 | Onboarding | PAN verification | Full reference pending |
-| ETF-012 | Eligibility | Checking eligibility | Site map reference |
-| ETF-013 | Eligibility | Credit score and eligibility result | Reference available |
-| ETF-014 | Profile | Update income and details | Reference available |
+| ETF-010 | Onboarding | Personal details | Flutter UI implemented. Borrower profile persistence pending. Full reference pending. |
+| ETF-011 | Onboarding | PAN verification | Flutter UI implemented. PAN verification integration pending. Full reference pending. |
+| ETF-012 | Eligibility | Checking eligibility | Flutter UI implemented. Eligibility service integration pending. Site map reference. |
+| ETF-013 | Eligibility | Credit score and eligibility result | Flutter UI implemented. Authoritative results and offer integration pending. Screenshot unavailable in the repository. |
+| ETF-014 | Profile | Update income and details | Phase 03 Flutter UI reused for rechecks after confirmed saves. Borrower profile integration pending. Screenshot unavailable in the repository. |
 | ETF-015 | Verification | Face verification instructions | Reference available |
 | ETF-016 | Verification | Live face check | Reference available |
 | ETF-017 | Verification | Face verification result | Design required |
@@ -120,7 +120,7 @@ These are conceptual domains, not approved tables. Inspect existing schema, enti
 | 01 | Flutter foundation, Welcome, legal screens, shared calculator and navigation | 001–003 | Implemented and accepted for internal development |
 | 02 | Authentication | 004–009, AUTH-10 | Internally accepted on POCO F4 |
 | 03 | Borrower onboarding, PAN, consent and profile | 010–011, 014 | Profile persistence and retrieval |
-| 04 | Eligibility | 012–014 | Backend-driven assessment and recheck |
+| 04 | Eligibility | 012–014 | Flutter checking and result UI, verified-save handoff and update navigation implemented. Backend-driven assessment and recheck pending. |
 | 05 | Loan selection, review, KFS and agreement | 023–026 | Authoritative quote and review |
 | 06 | Verification workflows | 015–022 | Valid verification checklist and provider states |
 | 07 | Acceptance and lifecycle | 027 | Authorized sandbox loan workflow |
@@ -149,7 +149,16 @@ ETF-004–009 and AUTH-10 passed physical-device acceptance on the POCO F4. Plan
 - Both focused AUTH-10 Flutter tests passed. The broader rerun passed 42 tests and left five incomplete after a runner interruption.
 - Deployment requires real SMS, provider timing checks for account enumeration, HTTPS, shared throttling before scaling, and intern backend contract verification. Keep older backends away from the V2 authentication database and isolate local mock credentials and data.
 
-## 14. Working references
+## 14. Phase 03 and Phase 04 implementation status
+
+ETF-010 through ETF-014 have Flutter UI implementations. Backend integration, visual comparison, widget test execution and physical-device acceptance remain pending for these screens.
+
+- ETF-012 presents progress, unavailable and retryable failure states. Authenticated Home starts an initial check only after confirmed PAN verification and profile persistence. A recheck starts only after ETF-014 confirms a save. An expired session takes the borrower to sign-in.
+- ETF-013 presents the service’s decision and any supplied score, credit band, date, source, factors, approved limit and affordable monthly EMI. ETF-014 is accessible from the result. The Phase 05 handoff accepts an opaque offer reference only for an eligible result. Loan selection awaits Phase 05 wiring.
+- Spring Boot currently exposes authentication and health endpoints. Borrower profile persistence, PAN verification, authoritative eligibility and offer data remain integration blockers. The app uses an unavailable service implementation. Synthetic eligibility data is confined to widget tests.
+- Targeted Dart analysis passed with zero issues for each phase using the existing cached executable. Seven onboarding widget tests and six eligibility widget tests await execution with a working Flutter test runner.
+
+## 15. Working references
 - ETF Loans website: https://etf-loans.vercel.app/
 - ETF Loans Site Map.html (14 November 2026)
 - User-provided screenshot batches: IMG_2681 through IMG_2724 (including welcome, sign-in, result, offer, review, checklist, Home, Loans, Profile, account/recovery, update, Aadhaar, face, address/work, deletion, notifications and legal pages).

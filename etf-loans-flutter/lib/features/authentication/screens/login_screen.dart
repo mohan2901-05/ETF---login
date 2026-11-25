@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:etf_loans/features/authentication/screens/account_access_screen.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:etf_loans/core/errors/app_errors.dart';
+import 'package:etf_loans/features/authentication/models/auth_purpose.dart';
 import 'package:etf_loans/features/authentication/screens/otp_verification_screen.dart';
 import 'package:etf_loans/features/authentication/services/authentication_service.dart';
 import 'package:etf_loans/features/authentication/services/mock_authentication_service.dart';
@@ -9,7 +12,9 @@ import 'package:etf_loans/core/network/network_service.dart';
 import 'package:etf_loans/theme/theme_config.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.authenticationService});
+
+  final AuthenticationService? authenticationService;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -18,6 +23,9 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _mobileController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _withPassword = true;
+  bool _showPassword = false;
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -31,9 +39,10 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _authService = const bool.fromEnvironment('USE_MOCK_AUTH', defaultValue: false)
-        ? MockAuthenticationService()
-        : AuthenticationService(networkService: NetworkService());
+    _authService = widget.authenticationService ??
+        (kDebugMode && const bool.fromEnvironment('USE_MOCK_AUTH')
+            ? MockAuthenticationService()
+            : AuthenticationService(networkService: NetworkService()));
 
     _screenController = AnimationController(
       duration: const Duration(milliseconds: 300),
@@ -58,9 +67,10 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   void dispose() {
     _mobileController.removeListener(_formatMobileNumber);
     _mobileController.dispose();
+    _passwordController.dispose();
     _screenController.dispose();
     _illustrationController.dispose();
-    _authService.close();
+    if (widget.authenticationService == null) _authService.close();
     super.dispose();
   }
 
@@ -84,6 +94,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   }
 
   Future<void> _validateAndSendOtp() async {
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -101,12 +112,20 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
     }
 
     try {
-      final response = await _authService.sendOtp(mobileNumber);
+      final purpose = _withPassword ? AuthPurpose.passwordLogin : AuthPurpose.legacyLogin;
+      final response = _withPassword
+          ? await _authService.startPasswordFlow(
+              purpose: purpose,
+              mobileNumber: mobileNumber,
+              password: _passwordController.text,
+            )
+          : await _authService.sendOtp(mobileNumber);
       if (!mounted) return;
 
       setState(() => _isLoading = false);
 
       if (response.success) {
+        _passwordController.clear();
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -116,6 +135,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
               expiresInSeconds: response.expirySeconds,
               resendAfterSeconds: response.resendAfterSeconds,
               developmentOtp: response.developmentOtp,
+              purpose: purpose,
             ),
           ),
         );
@@ -206,6 +226,18 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
                     _buildPrimaryButton().animate().fadeIn(duration: 300.ms, delay: 600.ms).slideY(begin: 0.1, end: 0, duration: 300.ms),
                     const SizedBox(height: 16),
                     _buildLegalText().animate().fadeIn(duration: 300.ms, delay: 700.ms),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      children: [
+                        for (final flow in [AccountAccess.create, AccountAccess.recover])
+                          TextButton(
+                            onPressed: _isLoading ? null : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(builder: (_) => AccountAccessScreen(flow: flow)),
+                            ),
+                            child: Text(flow.title),
+                          ),
+                      ],
+                    ),
                     const SizedBox(height: 12),
                     _buildDemoSkipButton().animate().fadeIn(duration: 300.ms, delay: 800.ms),
                     SizedBox(height: MediaQuery.of(context).padding.bottom + 24),
@@ -271,7 +303,9 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         ),
         const SizedBox(height: 8),
         Text(
-          'Your number is your login. There is no password to remember.',
+          _withPassword
+              ? 'Enter your mobile number and password to request a verification code.'
+              : 'If you haven’t set a password, sign in with a verification code.',
           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
             color: ThemeConfig.mutedText,
             height: 1.5,
@@ -288,6 +322,38 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildMobileField(),
+          if (_withPassword) ...[
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _passwordController,
+              enabled: !_isLoading,
+              obscureText: !_showPassword,
+              autocorrect: false,
+              enableSuggestions: false,
+              autofillHints: const [AutofillHints.password],
+              decoration: InputDecoration(
+                labelText: 'Password',
+                suffixIcon: IconButton(
+                  tooltip: _showPassword ? 'Hide password' : 'Show password',
+                  onPressed: _isLoading ? null : () => setState(() => _showPassword = !_showPassword),
+                  icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                ),
+              ),
+              validator: (value) => value == null || value.isEmpty ? 'Enter your password' : null,
+              onFieldSubmitted: (_) => _validateAndSendOtp(),
+            ),
+          ],
+          TextButton(
+            onPressed: _isLoading ? null : () {
+              _passwordController.clear();
+              setState(() {
+                _withPassword = !_withPassword;
+                _showPassword = false;
+                _errorMessage = null;
+              });
+            },
+            child: Text(_withPassword ? 'Sign in without a password' : 'Sign in with a password'),
+          ),
           if (_errorMessage != null) ...[
             const SizedBox(height: 12),
             Container(
@@ -332,6 +398,7 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         const SizedBox(height: 6),
         TextFormField(
           controller: _mobileController,
+          enabled: !_isLoading,
           keyboardType: TextInputType.phone,
           maxLength: 11,
           decoration: InputDecoration(
@@ -353,7 +420,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
             }
             return null;
           },
-          onFieldSubmitted: (_) => _validateAndSendOtp(),
+          textInputAction: _withPassword ? TextInputAction.next : TextInputAction.done,
+          onFieldSubmitted: _withPassword ? null : (_) => _validateAndSendOtp(),
         ),
         const SizedBox(height: 6),
         Text(
@@ -414,42 +482,16 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   }
 
   Widget _buildLegalText() {
-    return RichText(
-      textAlign: TextAlign.center,
-      text: TextSpan(
-        style: TextStyle(
-          fontFamily: ThemeConfig.bodyFontFamily,
-          fontSize: 12,
-          color: ThemeConfig.mutedText,
-          height: 1.5,
-        ),
-        children: [
-          const TextSpan(text: 'By continuing you agree to our '),
-          TextSpan(
-            text: 'Terms of Service',
-            style: TextStyle(
-              color: ThemeConfig.primaryGreen,
-              decoration: TextDecoration.underline,
-              decorationColor: ThemeConfig.primaryGreen,
-            ),
-          ),
-          const TextSpan(text: ' and '),
-          TextSpan(
-            text: 'Privacy Policy',
-            style: TextStyle(
-              color: ThemeConfig.primaryGreen,
-              decoration: TextDecoration.underline,
-              decorationColor: ThemeConfig.primaryGreen,
-            ),
-          ),
-          const TextSpan(text: '.'),
-        ],
-      ),
+    return Column(
+      children: [
+        Text('By continuing you agree to our', style: Theme.of(context).textTheme.labelSmall),
+        const AuthenticationLegalLinks(),
+      ],
     );
   }
 
   Widget _buildDemoSkipButton() {
-    if (!const bool.fromEnvironment('dart.vm.product')) {
+    if (kDebugMode && const bool.fromEnvironment('USE_MOCK_AUTH')) {
       return TextButton(
         onPressed: _isLoading ? null : _handleDemoSkip,
         style: TextButton.styleFrom(

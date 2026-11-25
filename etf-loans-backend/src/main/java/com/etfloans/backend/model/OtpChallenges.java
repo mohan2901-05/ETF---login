@@ -41,6 +41,26 @@ public class OtpChallenges {
     @Column(name = "delivery_provider", length = 50)
     private String deliveryProvider;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private OtpPurpose purpose = OtpPurpose.LEGACY_LOGIN;
+
+    @Column(name = "credential_fingerprint", length = 64)
+    private String credentialFingerprint;
+
+    public OtpPurpose getPurpose() {
+        return purpose;
+    }
+
+    public String getCredentialFingerprint() {
+        return credentialFingerprint;
+    }
+
+    public void bindTo(OtpPurpose purpose, String credentialFingerprint) {
+        this.purpose = purpose;
+        this.credentialFingerprint = credentialFingerprint;
+    }
+
     protected OtpChallenges() {
     }
 

@@ -1,6 +1,13 @@
 package com.etfloans.backend.service;
 
 import com.etfloans.backend.model.Users;
+import com.etfloans.backend.model.OtpPurpose;
+import com.etfloans.backend.model.PasswordGrant;
+import com.etfloans.backend.repository.PasswordGrantRepository;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.authentication.BadCredentialsException;
+import java.nio.charset.StandardCharsets;
+import java.util.Objects;
 import com.etfloans.backend.model.OtpChallenges;
 import com.etfloans.backend.model.UserSessions;
 import com.etfloans.backend.repository.UsersRepository;
@@ -9,11 +16,14 @@ import com.etfloans.backend.repository.UserSessionsRepository;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.UUID;
@@ -38,8 +48,8 @@ public class OtpAuthenticationService {
     @Value("${ETF_OTP_KEY:}")
     private String otpHmacKey;
 
-    @Value("${spring.profiles.active:}")
-    private String activeProfile;
+    private final Environment environment;
+    private final PasswordGrantRepository passwordGrants;
 
     @Value("${ETF_SESSION_EXPIRY_HOURS:720}")
     private long sessionExpiryHours;
@@ -66,18 +76,22 @@ public class OtpAuthenticationService {
                                     OtpChallengesRepository otpChallengesRepository,
                                     UserSessionsRepository userSessionsRepository,
                                     OtpDeliveryProvider deliveryProvider,
-                                    OtpRateLimiter rateLimiter) {
+                                    OtpRateLimiter rateLimiter,
+                                    Environment environment, PasswordGrantRepository passwordGrants) {
         this.usersRepository = usersRepository;
         this.otpChallengesRepository = otpChallengesRepository;
         this.userSessionsRepository = userSessionsRepository;
         this.deliveryProvider = deliveryProvider;
         this.rateLimiter = rateLimiter;
+        this.environment = environment;
+        this.passwordGrants = passwordGrants;
     }
 
     @PostConstruct
     public void init() {
         validateHmacKey();
         validateDemoConfiguration();
+        dummyHash = passwords.encode(generateSessionToken());
     }
 
     /**
@@ -86,6 +100,10 @@ public class OtpAuthenticationService {
      * - Production must never have mock-enabled with weak/no HMAC key
      */
     private void validateDemoConfiguration() {
+        if ((mockEnabled || demoEnabled) &&
+                !environment.acceptsProfiles(Profiles.of("(local | test) & !prod & !production"))) {
+            throw new IllegalStateException("Mock OTP and demo access require a local or test profile");
+        }
         if (demoEnabled) {
             if (!mockEnabled) {
                 throw new IllegalStateException("Demo mode (etf.demo.enabled=true) requires etf.otp.mock-enabled=true");
@@ -101,108 +119,248 @@ public class OtpAuthenticationService {
         // (already enforced by validateHmacKey which rejects known weak keys)
     }
 
-    /** Send OTP challenge. */
+    private static final String SUPPRESSED = "suppressed";
+    private static final String MOCK_PROVIDER = "mock";
+    private static final int GRANT_MINUTES = 5;
+    private final BCryptPasswordEncoder passwords = new BCryptPasswordEncoder(12);
+    private String dummyHash;
+
     public OtpChallenges sendChallenge(String mobileNumber) {
         rateLimiter.checkSend(mobileNumber);
+        Users user = usersRepository.findByMobileNumber(mobileNumber).orElse(null);
+        return issue(mobileNumber, OtpPurpose.LEGACY_LOGIN, fingerprint(user),
+                user == null || user.isActive() && user.getPasswordHash() == null,
+                LocalDateTime.now().plusMinutes(expiryMinutes));
+    }
 
-        String otp = useMockOtp() ? mockOtpCode : generateOtp();
+    public OtpChallenges startPasswordFlow(OtpPurpose purpose, String mobileNumber, String password) {
+        rateLimiter.checkSend(mobileNumber);
+        Users user = usersRepository.findByMobileNumber(mobileNumber).orElse(null);
+        boolean active = user != null && user.isActive();
+        boolean hasPassword = user != null && user.getPasswordHash() != null;
+        boolean deliver = switch (purpose) {
+            case PASSWORD_LOGIN -> {
+                boolean validInput = validLoginInput(password);
+                String input = validInput ? password : "";
+                boolean matches = passwords.matches(input, active && hasPassword ? user.getPasswordHash() : dummyHash);
+                if (!active || !hasPassword || !matches || !validInput) {
+                    throw new BadCredentialsException("Invalid mobile number or password. Please try again.");
+                }
+                yield true;
+            }
+            case REGISTRATION -> user == null || active && !hasPassword;
+            case RECOVERY -> active && hasPassword;
+            default -> throw new IllegalArgumentException("Invalid authentication purpose.");
+        };
+        return issue(mobileNumber, purpose, fingerprint(user), deliver,
+                LocalDateTime.now().plusMinutes(expiryMinutes));
+    }
 
-        OtpChallenges challenge = new OtpChallenges(
-                UUID.randomUUID(),
-                mobileNumber,
-                hashOtp(otp),
-                LocalDateTime.now().plusMinutes(expiryMinutes),
-                maxAttempts,
-                deliveryProvider.name()
-        );
+    private OtpChallenges issue(String mobile, OtpPurpose purpose, String fingerprint, boolean deliver,
+                                LocalDateTime expiresAt) {
+        deliver = deliver && (!MOCK_PROVIDER.equals(deliveryProvider.name()) || useMockOtp());
+        String otp = deliver && useMockOtp() ? mockOtpCode : generateOtp();
+        OtpChallenges challenge = new OtpChallenges(UUID.randomUUID(), mobile, hashOtp(otp),
+                expiresAt, maxAttempts,
+                deliver ? deliveryProvider.name() : SUPPRESSED);
+        challenge.bindTo(purpose, fingerprint);
         OtpChallenges saved = otpChallengesRepository.save(challenge);
-        deliveryProvider.deliver(mobileNumber, otp);
+        if (deliver) deliveryProvider.deliver(mobile, otp);
         return saved;
     }
 
-    /** Verify OTP by challengeId and create a session. */
     @Transactional
-    public AuthenticationResult verifyAndAuthenticate(OtpVerificationRequest request,
-                                                      LocalDateTime now) {
-        if (request.getChallengeId() == null || request.getChallengeId().isBlank()) {
-            throw new IllegalArgumentException("Challenge ID is required.");
+    public OtpChallenges resendChallenge(OtpPurpose purpose, String mobile, String id) {
+        rateLimiter.checkSend(mobile);
+        OtpChallenges previous = lockChallenge(id, mobile, purpose);
+        LocalDateTime now = LocalDateTime.now();
+        if (previous.getConsumedAt() != null) {
+            throw new IllegalArgumentException("Request a new verification code.");
         }
+        if (purpose == OtpPurpose.PASSWORD_LOGIN && !previous.getExpiresAt().isAfter(now)) {
+            throw new IllegalArgumentException("Sign in again to request a verification code.");
+        }
+        if (previous.getCreatedAt().plusSeconds(resendCooldownSeconds).isAfter(now)) {
+            throw new IllegalArgumentException("Please wait before resending.");
+        }
+        previous.setConsumedAt(now);
+        Users user = usersRepository.findByMobileNumber(mobile).orElse(null);
+        return issue(mobile, purpose, previous.getCredentialFingerprint(),
+                allowsVerification(previous) &&
+                        Objects.equals(previous.getCredentialFingerprint(), fingerprint(user)) &&
+                        (user == null || user.isActive()),
+                purpose == OtpPurpose.PASSWORD_LOGIN ? previous.getExpiresAt() : now.plusMinutes(expiryMinutes));
+    }
 
+    @Transactional(noRollbackFor = InvalidOtpException.class)
+    public AuthenticationResult verifyAndAuthenticate(OtpVerificationRequest request) {
+        return authenticate(request, OtpPurpose.LEGACY_LOGIN);
+    }
+
+    @Transactional(noRollbackFor = InvalidOtpException.class)
+    public AuthenticationResult verifyPasswordSignIn(OtpVerificationRequest request) {
+        return authenticate(request, OtpPurpose.PASSWORD_LOGIN);
+    }
+
+    private AuthenticationResult authenticate(OtpVerificationRequest request, OtpPurpose purpose) {
+        OtpChallenges challenge = verifyChallenge(request, purpose);
+        Users user = usersRepository.lockByMobileNumber(request.getMobileNumber()).orElse(null);
+        if (!matchesCredential(challenge, user)
+                || purpose == OtpPurpose.PASSWORD_LOGIN && user == null) {
+            throw new IllegalArgumentException("Authentication could not be completed.");
+        }
+        LocalDateTime now = consumeChallenge(challenge);
+        boolean isNew = user == null;
+        if (isNew) {
+            user = usersRepository.save(new Users(UUID.randomUUID(), request.getMobileNumber()));
+        }
+        String sessionToken = generateSessionToken();
+        userSessionsRepository.save(new UserSessions(UUID.randomUUID(), user.getId(), sha256(sessionToken),
+                now.plusHours(sessionExpiryHours), null, null));
+        return new AuthenticationResult(user, sessionToken, isNew);
+    }
+
+    @Transactional(noRollbackFor = InvalidOtpException.class)
+    public String verifyForPasswordGrant(OtpVerificationRequest request, OtpPurpose purpose) {
+        requireGrantPurpose(purpose);
+        OtpChallenges challenge = verifyChallenge(request, purpose);
+        Users user = usersRepository.lockByMobileNumber(request.getMobileNumber()).orElse(null);
+        if (!matchesCredential(challenge, user) || purpose == OtpPurpose.RECOVERY && user == null) {
+            throw new IllegalArgumentException("Authentication could not be completed.");
+        }
+        LocalDateTime now = consumeChallenge(challenge);
+        String token = generateSessionToken();
+        passwordGrants.save(new PasswordGrant(sha256(token), challenge, now.plusMinutes(GRANT_MINUTES)));
+        return token;
+    }
+
+    @Transactional
+    public void completePasswordFlow(OtpPurpose purpose, String token, String password) {
+        requireGrantPurpose(purpose);
+        if (password == null || password.codePointCount(0, password.length()) < 12 || !validLoginInput(password)) {
+            throw new IllegalArgumentException("Use at least 12 characters and at most 72 UTF-8 bytes.");
+        }
+        if (token == null || token.length() != 44) {
+            throw invalidGrant();
+        }
+        PasswordGrant grant = passwordGrants.lockByHash(sha256(token))
+                .orElseThrow(OtpAuthenticationService::invalidGrant);
+        if (!grant.isUsableFor(purpose, LocalDateTime.now())) {
+            throw invalidGrant();
+        }
+        Users user = usersRepository.lockByMobileNumber(grant.getMobileNumber()).orElse(null);
+        LocalDateTime now = LocalDateTime.now();
+        if (!grant.isUsableFor(purpose, now)
+                || !Objects.equals(grant.getCredentialFingerprint(), fingerprint(user)) ||
+                (user != null && !user.isActive()) || (purpose == OtpPurpose.RECOVERY && user == null)) {
+            throw invalidGrant();
+        }
+        if (user == null) {
+            user = new Users(UUID.randomUUID(), grant.getMobileNumber());
+        }
+        user.setPasswordHash(passwords.encode(password));
+        usersRepository.save(user);
+        userSessionsRepository.revokeAllForUser(user.getId(), now);
+        grant.consume(now);
+    }
+
+    private static IllegalArgumentException invalidGrant() {
+        return new IllegalArgumentException("Verification expired or invalid. Request a new code.");
+    }
+
+    private static void requireGrantPurpose(OtpPurpose purpose) {
+        if (purpose != OtpPurpose.REGISTRATION && purpose != OtpPurpose.RECOVERY) {
+            throw invalidGrant();
+        }
+    }
+
+    private boolean matchesCredential(OtpChallenges challenge, Users user) {
+        return (user == null || user.isActive())
+                && Objects.equals(challenge.getCredentialFingerprint(), fingerprint(user))
+                && (challenge.getPurpose() != OtpPurpose.LEGACY_LOGIN || fingerprint(user) == null);
+    }
+
+    private String fingerprint(Users user) {
+        return user == null || user.getPasswordHash() == null ? null : sha256(user.getPasswordHash());
+    }
+
+    private static boolean validLoginInput(String password) {
+        return password != null && !password.isBlank() && password.length() <= 72 &&
+                password.getBytes(StandardCharsets.UTF_8).length <= 72;
+    }
+
+    private OtpChallenges verifyChallenge(OtpVerificationRequest request, OtpPurpose purpose) {
         rateLimiter.checkVerify(request.getMobileNumber());
-
-        UUID challengeId;
-        try {
-            challengeId = UUID.fromString(request.getChallengeId());
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("Invalid challenge ID.");
-        }
-
-        OtpChallenges challenge = otpChallengesRepository.findByChallengeId(challengeId)
-                .orElseThrow(() -> new IllegalArgumentException("No OTP challenge found."));
-
+        OtpChallenges challenge = lockChallenge(request.getChallengeId(), request.getMobileNumber(), purpose);
         if (challenge.getConsumedAt() != null) {
             throw new IllegalArgumentException("This code has already been used. Request a new one.");
         }
-        if (!challenge.getMobileNumber().equals(request.getMobileNumber())) {
-            throw new IllegalArgumentException("Mobile number does not match this challenge.");
-        }
-        if (!challenge.getExpiresAt().isAfter(now)) {
-            throw new IllegalArgumentException("OTP has expired. Request a new one.");
-        }
+        requireUnexpired(challenge, LocalDateTime.now());
         if (challenge.getAttemptCount() >= challenge.getMaxAttempts()) {
             throw new IllegalArgumentException("Maximum verification attempts exceeded. Try again later.");
         }
-
         String inputHash = hashOtp(request.getOtp());
-        if (!inputHash.equals(challenge.getOtpHash())) {
+        if (!MessageDigest.isEqual(HexFormat.of().parseHex(inputHash),
+                HexFormat.of().parseHex(challenge.getOtpHash())) || !allowsVerification(challenge)) {
             challenge.setAttemptCount(challenge.getAttemptCount() + 1);
-            otpChallengesRepository.save(challenge);
-            throw new IllegalArgumentException("Invalid OTP.");
+            throw new InvalidOtpException();
         }
+        return challenge;
+    }
 
+    private boolean allowsVerification(OtpChallenges challenge) {
+        String provider = challenge.getDeliveryProvider();
+        return !SUPPRESSED.equals(provider) && (!MOCK_PROVIDER.equals(provider) || useMockOtp());
+    }
+
+    private static LocalDateTime consumeChallenge(OtpChallenges challenge) {
+        LocalDateTime now = LocalDateTime.now();
+        requireUnexpired(challenge, now);
         challenge.setConsumedAt(now);
-        otpChallengesRepository.save(challenge);
-
-        boolean[] isNewUser = {false};
-        Users user = usersRepository.findByMobileNumber(request.getMobileNumber())
-                .orElseGet(() -> {
-                    isNewUser[0] = true;
-                    return usersRepository.save(new Users(UUID.randomUUID(), request.getMobileNumber()));
-                });
-
-        String sessionToken = generateSessionToken();
-        String tokenHash = sha256(sessionToken);
-
-        UserSessions session = new UserSessions(
-                UUID.randomUUID(),
-                user.getId(),
-                tokenHash,
-                now.plusHours(sessionExpiryHours),
-                null,
-                null
-        );
-        userSessionsRepository.save(session);
-
-        return new AuthenticationResult(user, sessionToken, isNewUser[0]);
+        return now;
     }
 
-    /** Resend OTP, enforcing the resend cooldown against the latest challenge. */
-    public OtpChallenges resendChallenge(String mobileNumber, LocalDateTime now) {
-        OtpChallenges existing = otpChallengesRepository
-                .findFirstByMobileNumberOrderByCreatedAtDesc(mobileNumber)
-                .orElse(null);
-
-        if (existing != null && existing.getCreatedAt().plusSeconds(resendCooldownSeconds).isAfter(now)) {
-            throw new IllegalArgumentException(
-                    "Please wait " + resendCooldownSeconds + " seconds before resending.");
+    private static void requireUnexpired(OtpChallenges challenge, LocalDateTime now) {
+        if (!challenge.getExpiresAt().isAfter(now)) {
+            throw new IllegalArgumentException("OTP has expired. Request a new one.");
         }
-
-        return sendChallenge(mobileNumber);
     }
 
-    /** Return the mock OTP for demo responses, or null when demo mode is off. */
+    private OtpChallenges lockChallenge(String id, String mobile, OtpPurpose purpose) {
+        if (id == null || id.isBlank()) {
+            throw new IllegalArgumentException("Challenge ID is required.");
+        }
+        UUID uuid;
+        try {
+            uuid = UUID.fromString(id);
+            if (!uuid.toString().equalsIgnoreCase(id)) {
+                throw new IllegalArgumentException();
+            }
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("Invalid challenge ID.");
+        }
+        return otpChallengesRepository.lockByChallengeId(uuid)
+                .filter(challenge -> challenge.getMobileNumber().equals(mobile) && challenge.getPurpose() == purpose)
+                .orElseThrow(InvalidOtpException::new);
+    }
+
+
+    public int challengeExpirySeconds(OtpChallenges challenge) {
+        long milliseconds = Duration.between(challenge.getCreatedAt(), challenge.getExpiresAt()).toMillis();
+        return Math.toIntExact(Math.max(0, (milliseconds + 999) / 1000));
+    }
+
+    public int resendDelaySeconds() {
+        return Math.toIntExact(resendCooldownSeconds);
+    }
+
+    public int sessionExpirySeconds() {
+        return Math.toIntExact(Duration.ofHours(sessionExpiryHours).toSeconds());
+    }
+
+    /** Return the mock OTP only when local or test configuration enables it. */
     public String getMockOtp() {
-        return useMockOtp() && demoEnabled ? mockOtpCode : null;
+        return useMockOtp() ? mockOtpCode : null;
     }
 
     /** True when both mock OTP and demo mode are enabled. */
@@ -220,6 +378,8 @@ public class OtpAuthenticationService {
         String tokenHash = sha256(token);
         return userSessionsRepository.findByTokenHash(tokenHash)
                 .filter(UserSessions::isActive)
+                .filter(session -> usersRepository.findById(session.getUserId())
+                        .filter(Users::isActive).isPresent())
                 .orElse(null);
     }
 
@@ -238,10 +398,16 @@ public class OtpAuthenticationService {
                 });
     }
 
+    private static final class InvalidOtpException extends IllegalArgumentException {
+        private InvalidOtpException() {
+            super("Invalid OTP.");
+        }
+    }
+
     // Helper methods
 
     private boolean useMockOtp() {
-        return mockEnabled && mockOtpCode != null && mockOtpCode.length() == 6;
+        return mockEnabled && mockOtpCode != null && mockOtpCode.matches("[0-9]{6}");
     }
 
     private String generateOtp() {
@@ -254,7 +420,8 @@ public class OtpAuthenticationService {
         try {
             Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
             validateHmacKey();
-            SecretKeySpec secretKey = new SecretKeySpec(otpHmacKey.getBytes(), "HmacSHA256");
+            SecretKeySpec secretKey = new SecretKeySpec(effectiveOtpKey().getBytes(StandardCharsets.UTF_8),
+                    "HmacSHA256");
             sha256_HMAC.init(secretKey);
             byte[] hash = sha256_HMAC.doFinal(otp.getBytes());
             return HexFormat.of().formatHex(hash);
@@ -264,6 +431,7 @@ public class OtpAuthenticationService {
     }
 
     private void validateHmacKey() {
+        String otpHmacKey = effectiveOtpKey();
         if (otpHmacKey == null || otpHmacKey.isBlank()) {
             throw new IllegalStateException("ETF_OTP_KEY is required but not configured");
         }
@@ -274,6 +442,11 @@ public class OtpAuthenticationService {
                 || "test-otp-hmac-key".equals(otpHmacKey)) {
             throw new IllegalStateException("ETF_OTP_KEY must not be a default/development value");
         }
+    }
+
+    private String effectiveOtpKey() {
+        return environment.acceptsProfiles(Profiles.of("local | test"))
+                ? environment.getProperty("etf.otp.development-key", "") : otpHmacKey;
     }
 
     private String generateSessionToken() {

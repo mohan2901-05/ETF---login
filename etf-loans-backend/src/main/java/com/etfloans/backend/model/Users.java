@@ -20,6 +20,17 @@ public class Users {
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
 
+    @Column(name = "password_hash", length = 60)
+    private String passwordHash;
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

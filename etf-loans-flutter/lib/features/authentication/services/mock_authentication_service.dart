@@ -1,5 +1,6 @@
 import 'package:etf_loans/core/network/network_service.dart';
 import 'package:etf_loans/features/authentication/models/auth_models.dart';
+import 'package:etf_loans/features/authentication/models/auth_purpose.dart';
 import 'package:etf_loans/features/authentication/services/authentication_service.dart';
 
 /// Development-only mock authentication service.
@@ -9,6 +10,12 @@ import 'package:etf_loans/features/authentication/services/authentication_servic
 /// In production ([dart.vm.product] is true) this class must never be
 /// instantiated. A separate guard at the app entry point enforces this.
 class MockAuthenticationService extends AuthenticationService {
+  @override
+  Future<OtpSendResponse> resendChallenge({
+    required AuthPurpose purpose,
+    required String mobileNumber,
+    required String challengeId,
+  }) => sendOtp(mobileNumber);
   MockAuthenticationService._internal([NetworkService? networkService])
       : super(networkService: networkService ?? NetworkService());
 
@@ -96,6 +103,7 @@ class MockAuthenticationService extends AuthenticationService {
     required String challengeId,
     required String mobileNumber,
     required String otp,
+    AuthPurpose purpose = AuthPurpose.legacyLogin,
   }) async {
     // Check that this challenge belongs to the supplied mobile number
     if (_currentChallengeId != challengeId) {
@@ -157,7 +165,7 @@ class MockAuthenticationService extends AuthenticationService {
   // ------------------------------
 
   /// Clears all mock authentication state.
-  Future<void> logout() async {
+  Future<void> logout({required String accessToken}) async {
     _currentChallengeId = null;
     _currentMobileNumber = null;
     _challengeCreatedAt = null;

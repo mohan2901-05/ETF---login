@@ -16,6 +16,10 @@ class ServerException extends AppError {
   ServerException([String? message]) : super(message ?? 'Server error');
 }
 
+class InvalidSessionException extends ServerException {
+  InvalidSessionException() : super('Session expired. Please sign in again.');
+}
+
 class TimeoutException extends AppError {
   TimeoutException([String? message]) : super(message ?? 'Request timed out');
 }

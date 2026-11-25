@@ -12,6 +12,7 @@ class Constants {
 
   // Authentication endpoints (relative to baseUrl)
   static const String otpSend = '/api/auth/otp/send';
+  static const String otpResend = '/api/auth/otp/resend';
   static const String otpVerify = '/api/auth/otp/verify';
   static const String logout = '/api/auth/logout';
   static const String me = '/api/auth/me';

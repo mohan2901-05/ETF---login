@@ -7,13 +7,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Minimal in-memory sliding-window rate limiter keyed by mobile number.
- * Single-instance only; a distributed store (Redis) is needed for multi-instance
- * deployments.
+ * Bounded, single-instance sliding windows keyed by mobile number.
  */
 @Component
 public class OtpRateLimiter {
@@ -22,19 +20,25 @@ public class OtpRateLimiter {
     private final long sendWindowSeconds;
     private final int verifyLimit;
     private final long verifyWindowSeconds;
+    private final int maxBuckets;
 
-    private final Map<String, Deque<Instant>> sendBuckets = new ConcurrentHashMap<>();
-    private final Map<String, Deque<Instant>> verifyBuckets = new ConcurrentHashMap<>();
+    private final Map<String, Deque<Instant>> sendBuckets = new LinkedHashMap<>();
+    private final Map<String, Deque<Instant>> verifyBuckets = new LinkedHashMap<>();
 
     public OtpRateLimiter(
             @Value("${etf.otp.send-limit:3}") int sendLimit,
             @Value("${etf.otp.send-window-seconds:900}") long sendWindowSeconds,
             @Value("${etf.otp.verify-limit:10}") int verifyLimit,
-            @Value("${etf.otp.verify-window-seconds:900}") long verifyWindowSeconds) {
+            @Value("${etf.otp.verify-window-seconds:900}") long verifyWindowSeconds,
+            @Value("${etf.otp.max-buckets:10000}") int maxBuckets) {
+        if (sendLimit < 1 || sendWindowSeconds < 1 || verifyLimit < 1 || verifyWindowSeconds < 1 || maxBuckets < 1) {
+            throw new IllegalArgumentException("Authentication rate limits must be positive");
+        }
         this.sendLimit = sendLimit;
         this.sendWindowSeconds = sendWindowSeconds;
         this.verifyLimit = verifyLimit;
         this.verifyWindowSeconds = verifyWindowSeconds;
+        this.maxBuckets = maxBuckets;
     }
 
     public void checkSend(String mobileNumber) {
@@ -47,19 +51,35 @@ public class OtpRateLimiter {
 
     private void check(Map<String, Deque<Instant>> buckets, String key,
                        int limit, long windowSeconds) {
-        Instant now = Instant.now();
-        Instant cutoff = now.minusSeconds(windowSeconds);
-        Deque<Instant> bucket = buckets.computeIfAbsent(key, ignored -> new ArrayDeque<>());
-        synchronized (bucket) {
-            while (!bucket.isEmpty() && bucket.peekFirst().isBefore(cutoff)) {
+        synchronized (buckets) {
+            Instant now = Instant.now();
+            Instant cutoff = now.minusSeconds(windowSeconds);
+            // Buckets are ordered by their most recent accepted request.
+            var entries = buckets.values().iterator();
+            while (entries.hasNext() && !entries.next().peekLast().isAfter(cutoff)) {
+                entries.remove();
+            }
+            Deque<Instant> bucket = buckets.get(key);
+            if (bucket == null) {
+                if (buckets.size() >= maxBuckets) {
+                    var oldest = buckets.values().iterator().next().peekLast();
+                    throw new RateLimitExceededException(retryAfter(oldest, now, windowSeconds));
+                }
+                bucket = new ArrayDeque<>();
+            }
+            while (!bucket.isEmpty() && !bucket.peekFirst().isAfter(cutoff)) {
                 bucket.pollFirst();
             }
             if (bucket.size() >= limit) {
-                long elapsed = Duration.between(bucket.peekFirst(), now).getSeconds();
-                long retryAfter = Math.max(1, windowSeconds - elapsed);
-                throw new RateLimitExceededException(retryAfter);
+                throw new RateLimitExceededException(retryAfter(bucket.peekFirst(), now, windowSeconds));
             }
             bucket.addLast(now);
+            buckets.remove(key);
+            buckets.put(key, bucket);
         }
+    }
+
+    private long retryAfter(Instant recorded, Instant now, long windowSeconds) {
+        return Math.max(1, windowSeconds - Duration.between(recorded, now).getSeconds());
     }
 }

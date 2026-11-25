@@ -41,7 +41,9 @@ public class DemoAccessFilter extends OncePerRequestFilter {
     private static final String LEGACY_DEMO_HEADER = "X-Demo-Access-Token";
     private static final String[] DEMO_PROTECTED_PATHS = {
         "/api/auth/otp/send",
-        "/api/auth/otp/verify"
+        "/api/auth/otp/verify",
+        "/api/auth/otp/resend",
+        "/api/auth/password"
     };
 
     @Override

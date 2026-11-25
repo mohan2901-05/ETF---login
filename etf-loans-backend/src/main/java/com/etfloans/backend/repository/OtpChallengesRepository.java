@@ -2,6 +2,8 @@ package com.etfloans.backend.repository;
 
 import com.etfloans.backend.model.OtpChallenges;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,6 +14,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface OtpChallengesRepository extends JpaRepository<OtpChallenges, UUID> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from OtpChallenges c where c.challengeId = :challengeId")
+    Optional<OtpChallenges> lockByChallengeId(@Param("challengeId") UUID challengeId);
+
     Optional<OtpChallenges> findByChallengeId(UUID challengeId);
     Optional<OtpChallenges> findFirstByMobileNumberOrderByCreatedAtDesc(String mobileNumber);
 

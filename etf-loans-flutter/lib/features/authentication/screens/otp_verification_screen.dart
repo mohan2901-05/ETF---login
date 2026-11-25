@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
 import 'package:etf_loans/core/errors/app_errors.dart';
@@ -7,7 +8,7 @@ import 'package:etf_loans/features/authentication/services/mock_authentication_s
 import 'package:etf_loans/core/network/network_service.dart';
 import 'package:etf_loans/theme/theme_config.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:etf_loans/features/authentication/models/auth_models.dart';
+import 'package:etf_loans/features/authentication/models/auth_purpose.dart';
 import 'package:etf_loans/features/authentication/screens/home_screen.dart';
 
 /// Interface for secure storage to allow test mocking.
@@ -31,6 +32,9 @@ class OtpVerificationScreen extends StatefulWidget {
   final int? resendAfterSeconds;
   final String? developmentOtp;
   final SecureStorage? secureStorage;
+  final AuthPurpose purpose;
+  final Widget Function(String grant)? passwordScreen;
+  final AuthenticationService? authenticationService;
 
   const OtpVerificationScreen({
     required this.mobileNumber,
@@ -39,8 +43,15 @@ class OtpVerificationScreen extends StatefulWidget {
     this.resendAfterSeconds,
     this.developmentOtp,
     this.secureStorage,
+    this.purpose = AuthPurpose.legacyLogin,
+    this.passwordScreen,
+    this.authenticationService,
     super.key,
-  });
+  }) : assert(
+         (purpose == AuthPurpose.registration || purpose == AuthPurpose.recovery)
+             ? passwordScreen != null
+             : passwordScreen == null,
+       );
 
   @override
   State<OtpVerificationScreen> createState() => _OtpVerificationScreenState();
@@ -54,6 +65,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
   late final SecureStorage _secureStorage;
 
   String _otp = '';
+  String? _challengeId;
+  String? _developmentOtp;
   OtpState _state = OtpState.empty;
   String? _errorMessage;
   String? _statusMessage;
@@ -71,20 +84,24 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
   late final Animation<double> _checkAnimation;
   late final Animation<double> _errorShakeAnimation;
   late final List<Animation<double>> _successTileAnimations;
-  late final Animation<int> _countdownAnimation;
+  int _countdownSeconds = 0;
 
   @override
   void initState() {
     super.initState();
     _hiddenController = TextEditingController();
     _hiddenFocusNode = FocusNode();
-    _authService = const bool.fromEnvironment('USE_MOCK_AUTH', defaultValue: false)
+    _authService = widget.authenticationService ?? (widget.purpose == AuthPurpose.legacyLogin &&
+        kDebugMode && const bool.fromEnvironment('USE_MOCK_AUTH')
         ? MockAuthenticationService()
-        : AuthenticationService(networkService: NetworkService());
+        : AuthenticationService(networkService: NetworkService()));
     _secureStorage = widget.secureStorage ??
         _FlutterSecureStorageAdapter(const FlutterSecureStorage());
 
+    _challengeId = widget.challengeId;
+    _developmentOtp = widget.developmentOtp;
     _resendCountdown = widget.resendAfterSeconds ?? 30;
+    _countdownSeconds = _resendCountdown;
 
     _caretController = AnimationController(
       duration: const Duration(seconds: 1),
@@ -137,18 +154,13 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
       );
     });
 
-    _countdownAnimation = IntTween(
-      begin: _resendCountdown,
-      end: 0,
-    ).animate(_countdownController);
-
     _hiddenController.addListener(_onHiddenInputChanged);
     _countdownController.addListener(_onCountdownTick);
     _countdownController.forward();
 
     // Focus the hidden input for autofill
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _hiddenFocusNode.requestFocus();
+      if (mounted) _hiddenFocusNode.requestFocus();
     });
   }
 
@@ -162,7 +174,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
     _errorController.dispose();
     _successController.dispose();
     _countdownController.dispose();
-    _authService.close();
+    if (widget.authenticationService == null) _authService.close();
     super.dispose();
   }
 
@@ -190,15 +202,16 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
   }
 
   void _onCountdownTick() {
-    if (!_countdownController.isAnimating) return;
-    setState(() {
-      _resendCountdown = _countdownAnimation.value;
-    });
+    final remaining = (_countdownSeconds * (1 - _countdownController.value)).ceil();
+    if (remaining != _resendCountdown) {
+      setState(() => _resendCountdown = remaining);
+    }
   }
 
   Future<void> _verifyOtp() async {
-    if (_verificationInProgress || _state == OtpState.success) return;
-    if (widget.challengeId == null) {
+    if (_verificationInProgress || _isResending || _state == OtpState.success || _otp.length != 6) return;
+    final challengeId = _challengeId;
+    if (challengeId == null || challengeId.isEmpty) {
       _showError('Invalid session. Please request a new code.');
       return;
     }
@@ -210,17 +223,33 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
     _checkController.forward(from: 0);
 
     try {
+      if (widget.purpose.issuesGrant) {
+        final grant = await _authService.verifyPasswordGrant(
+          purpose: widget.purpose,
+          challengeId: challengeId,
+          mobileNumber: widget.mobileNumber,
+          otp: _otp,
+        );
+        if (!mounted) return;
+        _checkController.stop();
+        _state = OtpState.success;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(builder: (_) => widget.passwordScreen!(grant)),
+        );
+        return;
+      }
       final response = await _authService.verifyOtp(
-        challengeId: widget.challengeId!,
+        challengeId: challengeId,
         mobileNumber: widget.mobileNumber,
         otp: _otp,
+        purpose: widget.purpose,
       );
 
       if (!mounted) return;
 
       _checkController.stop();
 
-      if (response.success) {
+      if (response.success && (response.accessToken?.isNotEmpty ?? false)) {
         _state = OtpState.success;
         _statusMessage = 'Verified';
         _successController.forward(from: 0);
@@ -238,10 +267,6 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
         _state = OtpState.error;
         _errorMessage = response.message ?? 'Invalid OTP';
         _errorController.forward(from: 0);
-        _countdownController
-            .reset(); // Reset countdown on error per spec
-        _resendCountdown = widget.resendAfterSeconds ?? 30;
-        _countdownController.forward(from: 0);
       }
     } on AppError catch (e) {
       if (!mounted) return;
@@ -249,18 +274,12 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
       _state = OtpState.error;
       _errorMessage = e.message;
       _errorController.forward(from: 0);
-      _countdownController.reset();
-      _resendCountdown = widget.resendAfterSeconds ?? 30;
-      _countdownController.forward(from: 0);
     } catch (e) {
       if (!mounted) return;
       _checkController.stop();
       _state = OtpState.error;
       _errorMessage = 'Something went wrong. Please try again.';
       _errorController.forward(from: 0);
-      _countdownController.reset();
-      _resendCountdown = widget.resendAfterSeconds ?? 30;
-      _countdownController.forward(from: 0);
     } finally {
       if (mounted) {
         setState(() {
@@ -271,27 +290,45 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
   }
 
   Future<void> _resendOtp() async {
-    if (_isResending || _resendCountdown > 0) return;
+    if (_isResending || _verificationInProgress || _state == OtpState.success || _resendCountdown > 0) return;
 
+    final previous = _challengeId;
+    if (previous == null || previous.isEmpty) {
+      _showError('Invalid session. Please request a new code.');
+      return;
+    }
     setState(() => _isResending = true);
 
     try {
-      final response = await _authService.sendOtp(widget.mobileNumber);
+      final response = await _authService.resendChallenge(
+        purpose: widget.purpose,
+        mobileNumber: widget.mobileNumber,
+        challengeId: previous,
+      );
       if (!mounted) return;
 
       setState(() => _isResending = false);
 
-      if (response.success) {
-        // Update challenge ID and reset countdown
-        _resendCountdown = response.resendAfterSeconds ?? 30;
+      final challengeId = response.challengeId;
+      if (response.success && challengeId != null && challengeId.isNotEmpty) {
+        _challengeId = challengeId;
+        _developmentOtp = response.developmentOtp;
+        _hiddenController.clear();
+        _state = OtpState.empty;
+        _countdownSeconds = response.resendAfterSeconds ?? 30;
+        _resendCountdown = _countdownSeconds;
         _countdownController
-          ..reset()
-          ..forward();
+          ..duration = Duration(seconds: _countdownSeconds)
+          ..forward(from: 0);
         _showStatus('New code sent', isSuccess: true);
       } else {
         _showError(response.message ?? 'Failed to resend code');
       }
-    } catch (e) {
+    } on AppError catch (e) {
+      if (!mounted) return;
+      setState(() => _isResending = false);
+      _showError(e.message);
+    } catch (_) {
       if (!mounted) return;
       setState(() => _isResending = false);
       _showError('Failed to resend code. Please try again.');
@@ -315,21 +352,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
   void _navigateToSuccess() {
     if (!mounted) return;
     
-    // Create a minimal UserProfile from the verification response data
-    // We have the mobile number, and the token. We'll fetch the full profile in HomeScreen.
-    final userProfile = UserProfile(
-      id: '', // Will be fetched in HomeScreen
-      mobileNumber: widget.mobileNumber,
-      name: '',
-      email: null,
-      createdAt: null,
-    );
-    
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
         builder: (_) => HomeScreen(
-          initialUser: userProfile,
           initialToken: _accessToken,
         ),
       ),
@@ -390,29 +416,31 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
           ),
           // Hidden input for autofill
           Positioned.fill(
-            child: Opacity(
-              opacity: 0,
-              child: TextField(
-                controller: _hiddenController,
-                focusNode: _hiddenFocusNode,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(6),
-                ],
-                autofillHints: const [AutofillHints.oneTimeCode],
-                maxLength: 6,
-                decoration: const InputDecoration(
-                  border: InputBorder.none,
-                  counterText: '',
+            child: IgnorePointer(
+              child: Opacity(
+                opacity: 0,
+                child: TextField(
+                  controller: _hiddenController,
+                  focusNode: _hiddenFocusNode,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(6),
+                  ],
+                  autofillHints: const [AutofillHints.oneTimeCode],
+                  maxLength: 6,
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    counterText: '',
+                  ),
+                  style: const TextStyle(
+                    color: Colors.transparent,
+                    fontSize: 16,
+                  ),
+                  cursorColor: Colors.transparent,
+                  enableSuggestions: false,
+                  autocorrect: false,
                 ),
-                style: const TextStyle(
-                  color: Colors.transparent,
-                  fontSize: 16,
-                ),
-                cursorColor: Colors.transparent,
-                enableSuggestions: false,
-                autocorrect: false,
               ),
             ),
           ),
@@ -454,6 +482,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
       children: [
         Text(
           'Enter the code',
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontFamily: ThemeConfig.headingFontFamily,
             fontSize: 30,
@@ -464,8 +493,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
           ),
         ),
         const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(
               'Sent to ',
@@ -490,7 +520,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
             _buildEditButton(),
           ],
         ),
-        if (widget.developmentOtp != null) ...[
+        if (kDebugMode && _developmentOtp != null) ...[
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -502,7 +532,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
               ),
             ),
             child: Text(
-              'Development code: ${widget.developmentOtp}',
+              'Development code: $_developmentOtp',
               style: TextStyle(
                 fontFamily: ThemeConfig.bodyFontFamily,
                 fontSize: 13,

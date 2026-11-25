@@ -29,6 +29,7 @@ class _HomeScreenState extends State<HomeScreen> {
   UserProfile? _user;
   String? _accessToken;
   bool _isLoading = true;
+  bool _isSigningOut = false;
   String? _errorMessage;
 
   @override
@@ -43,19 +44,14 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       _accessToken = widget.initialToken ?? await _secureStorage.read(key: 'accessToken');
 
-      if (_accessToken != null) {
-        _user = await _authService.getUserProfile(accessToken: _accessToken!);
-      } else if (widget.initialUser != null) {
+      if (widget.initialUser != null && widget.initialToken != null) {
         _user = widget.initialUser;
+      } else if (_accessToken != null) {
+        _user = await _authService.getUserProfile(accessToken: _accessToken!);
       }
-    } on ServerException catch (e) {
-      // Handle authentication failures - clear invalid token and redirect to login
-      if (e.message.contains('expired') || e.message.contains('denied') || e.message.contains('Invalid session')) {
-        await _secureStorage.delete(key: 'accessToken');
-        _errorMessage = 'Session expired. Please log in again.';
-      } else {
-        _errorMessage = e.message;
-      }
+    } on InvalidSessionException {
+      await _secureStorage.delete(key: 'accessToken');
+      if (mounted) _returnToSignIn();
     } on AppError catch (e) {
       _errorMessage = e.message;
     } catch (e) {
@@ -68,20 +64,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _logout() async {
+    if (_isSigningOut) return;
+    setState(() => _isSigningOut = true);
     try {
-      await _authService.logout();
+      final token = _accessToken;
+      if (token != null && token.isNotEmpty) {
+        await _authService.logout(accessToken: token);
+      }
       await _secureStorage.delete(key: 'accessToken');
+      if (mounted) _returnToSignIn();
+    } catch (_) {
       if (mounted) {
-        Navigator.popUntil(
-          context,
-          (route) => route.settings.name == AppRoutes.signIn || route.isFirst,
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sign-out failed. Please try again.')),
         );
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _errorMessage = 'Logout failed. Please try again.');
-      }
+    } finally {
+      if (mounted) setState(() => _isSigningOut = false);
     }
+  }
+
+  void _returnToSignIn() {
+    final navigator = Navigator.of(context);
+    var foundSignIn = false;
+    navigator.popUntil((route) {
+      foundSignIn = route.settings.name == AppRoutes.signIn;
+      return foundSignIn || route.isFirst;
+    });
+    if (!foundSignIn) navigator.pushNamed(AppRoutes.signIn);
   }
 
   @override
@@ -225,7 +235,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       children: [
         ElevatedButton.icon(
-          onPressed: _logout,
+          onPressed: _isSigningOut ? null : _logout,
           icon: const Icon(Icons.logout_rounded, size: 20),
           label: const Text('Logout'),
           style: ElevatedButton.styleFrom(

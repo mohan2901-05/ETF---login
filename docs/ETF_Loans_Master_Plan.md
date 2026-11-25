@@ -24,12 +24,12 @@ Some entries may become dialogs or reusable views rather than standalone routes.
 | ETF-001 | Public | Welcome and landing | Implemented and accepted for internal development |
 | ETF-002 | Public | Terms of Service | Implemented and accepted for internal development |
 | ETF-003 | Public | Privacy Policy | Implemented and accepted for internal development |
-| ETF-004 | Auth | Sign in | Existing; password enhancement pending approval |
-| ETF-005 | Auth | OTP verification | Developed |
-| ETF-006 | Auth | Create account | Reference available |
-| ETF-007 | Auth | Set password | Design required |
-| ETF-008 | Auth | Forgot password | Reference available |
-| ETF-009 | Auth | Set new password | Design required |
+| ETF-004 | Auth | Sign in | Internally accepted on POCO F4, including AUTH-10 |
+| ETF-005 | Auth | OTP verification | Internally accepted on POCO F4 |
+| ETF-006 | Auth | Create account | Internally accepted on POCO F4 |
+| ETF-007 | Auth | Set password | Internally accepted on POCO F4 |
+| ETF-008 | Auth | Forgot password | Internally accepted on POCO F4 |
+| ETF-009 | Auth | Set new password | Internally accepted on POCO F4 |
 | ETF-010 | Onboarding | Personal details | Full reference pending |
 | ETF-011 | Onboarding | PAN verification | Full reference pending |
 | ETF-012 | Eligibility | Checking eligibility | Site map reference |
@@ -118,7 +118,7 @@ These are conceptual domains, not approved tables. Inspect existing schema, enti
 |---|---|---|---|
 | 00 | Read-only repository and architecture investigation | All | Baseline investigation completed |
 | 01 | Flutter foundation, Welcome, legal screens, shared calculator and navigation | 001–003 | Implemented and accepted for internal development |
-| 02 | Authentication enhancement if approved | 004–009 | Login/registration/recovery regression-tested |
+| 02 | Authentication | 004–009, AUTH-10 | Internally accepted on POCO F4 |
 | 03 | Borrower onboarding, PAN, consent and profile | 010–011, 014 | Profile persistence and retrieval |
 | 04 | Eligibility | 012–014 | Backend-driven assessment and recheck |
 | 05 | Loan selection, review, KFS and agreement | 023–026 | Authoritative quote and review |
@@ -142,8 +142,12 @@ Discover actual installed skills before invoking them. Relevant expertise: Flutt
 ## 12. Decisions pending approval
 Continue existing Flutter project and PostgreSQL. Preserve OTP baseline. Decide whether to reuse the intern backend or extend local Spring Boot (separate backend only with team authorization), whether password authentication is required, and whether provider integrations are sandbox-only initially. Match screenshot designs; design missing views internally. Native camera for mobile, defer QR handoff unless required. Defer cloud deployment for now. Admin/financier portals outside borrower scope. Confirm approved legal documents, credit/business rules, consent, retention, provider credentials and actual integration contracts before implementing affected features.
 
-## 13. Next implementation task — Phase 02
-Phase 02 covers authentication screens ETF-004–009. Use the existing OTP sign-in flow as the regression baseline and resolve pending authentication decisions before changing contracts or implementing new flows.
+## 13. Phase 02 internal acceptance
+ETF-004–009 and AUTH-10 passed physical-device acceptance on the POCO F4. Planned authentication journeys were accepted for internal use.
+
+- Automated PostgreSQL V1-to-V2 verification remains open after connection resets. The independent seeded SQL check verified record preservation.
+- Both focused AUTH-10 Flutter tests passed. The broader rerun passed 42 tests and left five incomplete after a runner interruption.
+- Deployment requires real SMS, provider timing checks for account enumeration, HTTPS, shared throttling before scaling, and intern backend contract verification. Keep older backends away from the V2 authentication database and isolate local mock credentials and data.
 
 ## 14. Working references
 - ETF Loans website: https://etf-loans.vercel.app/

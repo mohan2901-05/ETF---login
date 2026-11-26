@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:etf_loans/core/network/network_service.dart';
@@ -243,6 +244,84 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'clicking either end of the OTP boxes accepts input during a 429 resend',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(420, 700));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final resend = Completer<http.Response>();
+      final verification = <Map<String, dynamic>>[];
+      final service = AuthenticationService(
+        networkService: NetworkService(
+          client: MockClient((request) async {
+            if (request.url.path.endsWith('/resend')) return resend.future;
+            expect(request.url.path, endsWith('/recovery/verify'));
+            verification.add(jsonDecode(request.body) as Map<String, dynamic>);
+            return http.Response('{"grantToken":"fixture-grant"}', 200);
+          }),
+        ),
+      );
+      addTearDown(service.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeConfig.lightTheme,
+          home: OtpVerificationScreen(
+            mobileNumber: '9590000000',
+            challengeId: 'initial',
+            resendAfterSeconds: 0,
+            purpose: AuthPurpose.recovery,
+            authenticationService: service,
+            secureStorage: _NoSessionStorage(),
+            passwordScreen: (grant) => Scaffold(body: Text(grant)),
+          ),
+        ),
+      );
+      await tester.pump();
+      final input = find.byType(TextField);
+      final field = tester.widget<TextField>(input);
+      final boxes = tester.getRect(input);
+      field.focusNode!.unfocus();
+      await tester.pump();
+      await tester.tapAt(boxes.centerLeft + const Offset(30, 0));
+      await tester.pump();
+      expect(field.focusNode!.hasFocus, isTrue);
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: '12',
+          selection: TextSelection.collapsed(offset: 2),
+        ),
+      );
+      await tester.pump();
+      expect(field.controller!.text, '12');
+
+      final resendButton = find.text('Resend code');
+      await tester.ensureVisible(resendButton);
+      await tester.tap(resendButton);
+      await tester.pump();
+      field.focusNode!.unfocus();
+      await tester.pump();
+      await tester.ensureVisible(input);
+      await tester.tapAt(tester.getRect(input).centerRight - const Offset(30, 0));
+      await tester.pump();
+      expect(field.focusNode!.hasFocus, isTrue);
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: '654321',
+          selection: TextSelection.collapsed(offset: 6),
+        ),
+      );
+      await tester.pump();
+      expect(verification, isEmpty);
+
+      resend.complete(http.Response('{"message":"Rate limited"}', 429));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(verification.single['otp'], '654321');
+      expect(verification.single['challengeId'], 'initial');
+      expect(find.text('fixture-grant'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'recovery OTP verifies the replacement challenge and issues no session',

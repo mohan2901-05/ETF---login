@@ -21,11 +21,15 @@ abstract interface class BorrowerService {
   });
 }
 
-class BorrowerServiceUnavailable extends AppError {
+class BorrowerRequestException extends AppError {
+  BorrowerRequestException(super.message);
+}
+
+class BorrowerServiceUnavailable extends BorrowerRequestException {
   BorrowerServiceUnavailable(super.message);
 }
 
-/// The current backend exposes account authentication only.
+/// Fallback for callers without an injected API adapter.
 class UnavailableBorrowerService implements BorrowerService {
   const UnavailableBorrowerService();
 

@@ -42,6 +42,25 @@ class NetworkService {
     return _handleResponse(response);
   }
 
+  Future<Map<String, dynamic>> patch(
+    String endpoint, {
+    required Map<String, dynamic> body,
+    required String authToken,
+  }) async {
+    final uri = Uri.parse('${Constants.baseUrl}$endpoint');
+    final response = await _send(
+      () => _client.patch(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $authToken',
+        },
+        body: json.encode(body),
+      ),
+    );
+    return _handleResponse(response);
+  }
+
   Future<Map<String, dynamic>> put(String endpoint, {Map<String, dynamic>? body, String? authToken}) async {
     final uri = Uri.parse('${Constants.baseUrl}$endpoint');
     final headers = <String, String>{

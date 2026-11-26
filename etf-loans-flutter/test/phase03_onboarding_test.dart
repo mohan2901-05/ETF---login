@@ -25,6 +25,7 @@ void main() {
             name: 'Asha Rao',
           ),
           initialToken: 'test-session',
+          borrowerService: const UnavailableBorrowerService(),
         ),
       ),
     );
@@ -95,7 +96,7 @@ void main() {
       expect(_text(tester, 'Full name'), 'Asha Rao');
       expect(_text(tester, 'Monthly take-home income'), '42500.50');
       expect(_text(tester, 'Other monthly EMIs'), '0');
-      expect(find.text('Salaried'), findsOneWidget);
+      _expectVisibleEmployment(tester, 'Salaried');
       await _tap(tester, 'Continue to PAN verification');
       expect(_text(tester, 'PAN'), 'abcde1234f');
       expect(
@@ -120,6 +121,7 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(service.submittedPan, 'ABCDE1234F');
       expect(service.submittedConsent, isTrue);
+      expect(service.submittedFinances?.employment, EmploymentType.salaried);
       expect(result, isNull);
 
       service.onboarding.completeError(NetworkException());
@@ -148,13 +150,16 @@ void main() {
       expect(_field('PAN'), findsNothing);
       expect(_field('Date of birth'), findsNothing);
       expect(_text(tester, 'Monthly take-home income'), '40000');
+      _expectVisibleEmployment(tester, 'Self-employed');
       await _enter(tester, 'Monthly take-home income', '-1');
       await _tap(tester, 'Save and recheck eligibility');
       expect(service.savedFinances, isNull);
       await _enter(tester, 'Monthly take-home income', '41000.25');
+      await _selectEmployment(tester, 'Salaried');
+      _expectVisibleEmployment(tester, 'Salaried');
       await _tap(tester, 'Save and recheck eligibility');
       expect(service.savedFinances?.monthlyIncome, '41000.25');
-      expect(service.savedFinances?.employment, EmploymentType.selfEmployed);
+      expect(service.savedFinances?.employment, EmploymentType.salaried);
       expect(result, BorrowerFlowResult.recheckEligibility);
     },
   );
@@ -220,6 +225,7 @@ class _BorrowerTestService implements BorrowerService {
   Completer<void> onboarding = Completer<void>();
   String? submittedPan;
   bool? submittedConsent;
+  BorrowerFinances? submittedFinances;
   BorrowerFinances? savedFinances;
 
   @override
@@ -239,6 +245,7 @@ class _BorrowerTestService implements BorrowerService {
     expect(accessToken, 'test-session');
     submittedPan = pan;
     submittedConsent = panConsent;
+    submittedFinances = details.finances;
     return onboarding.future;
   }
 
@@ -321,11 +328,29 @@ Future<void> _tap(WidgetTester tester, String label) async {
 Future<void> _fillPersonalDetails(WidgetTester tester) async {
   await _enter(tester, 'Full name', 'Asha Rao');
   await _enter(tester, 'Date of birth', '20/05/1990');
+  await _selectEmployment(tester, 'Salaried');
+  _expectVisibleEmployment(tester, 'Salaried');
+  await _enter(tester, 'Monthly take-home income', '42500.50');
+  await _enter(tester, 'Other monthly EMIs', '0');
+}
+
+Future<void> _selectEmployment(WidgetTester tester, String label) async {
   final employment = find.byType(DropdownButtonFormField<EmploymentType>);
   await tester.ensureVisible(employment);
   await tester.tap(employment);
   await tester.pumpAndSettle();
-  await _tap(tester, 'Salaried');
-  await _enter(tester, 'Monthly take-home income', '42500.50');
-  await _enter(tester, 'Other monthly EMIs', '0');
+  final option = find.text(label).last;
+  await tester.ensureVisible(option);
+  await tester.tap(option);
+  await tester.pumpAndSettle();
+}
+
+void _expectVisibleEmployment(WidgetTester tester, String label) {
+  final button = find.byType(DropdownButton<EmploymentType>);
+  final text = find.descendant(of: button, matching: find.text(label));
+  final labelBounds = tester.getRect(text);
+  final buttonBounds = tester.getRect(button);
+  expect(labelBounds.height, greaterThan(0));
+  expect(labelBounds.top, greaterThanOrEqualTo(buttonBounds.top));
+  expect(labelBounds.bottom, lessThanOrEqualTo(buttonBounds.bottom + 0.01));
 }

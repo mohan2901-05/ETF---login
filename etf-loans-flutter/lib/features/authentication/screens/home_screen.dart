@@ -9,6 +9,9 @@ import 'package:etf_loans/core/errors/app_errors.dart';
 import 'package:etf_loans/features/eligibility/eligibility_flow.dart';
 import 'package:etf_loans/features/eligibility/eligibility_models.dart';
 import 'package:etf_loans/features/eligibility/eligibility_service.dart';
+import 'package:etf_loans/features/loan_application/loan_quote_service.dart';
+import 'package:etf_loans/features/loan_application/loan_selection_screen.dart';
+import 'package:etf_loans/features/onboarding/api_borrower_service.dart';
 import 'package:etf_loans/features/onboarding/borrower_details.dart';
 import 'package:etf_loans/features/onboarding/borrower_flow.dart';
 import 'package:etf_loans/features/onboarding/borrower_service.dart';
@@ -18,14 +21,16 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class HomeScreen extends StatefulWidget {
   final UserProfile? initialUser;
   final String? initialToken;
-  final BorrowerService borrowerService;
+  final BorrowerService? borrowerService;
   final EligibilityService eligibilityService;
+  final LoanQuoteService loanQuoteService;
 
   const HomeScreen({
     this.initialUser,
     this.initialToken,
-    this.borrowerService = const UnavailableBorrowerService(),
+    this.borrowerService,
     this.eligibilityService = const UnavailableEligibilityService(),
+    this.loanQuoteService = const UnavailableLoanQuoteService(),
     super.key,
   });
 
@@ -35,6 +40,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   late final AuthenticationService _authService;
+  late final BorrowerService _apiBorrowerService;
   late final FlutterSecureStorage _secureStorage;
 
   UserProfile? _user;
@@ -42,12 +48,15 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = true;
   bool _isSigningOut = false;
   bool _openingBorrowerFlow = false;
+  bool _loanSelectionOpen = false;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _authService = AuthenticationService(networkService: NetworkService());
+    final network = NetworkService();
+    _authService = AuthenticationService(networkService: network);
+    _apiBorrowerService = ApiBorrowerService(network);
     _secureStorage = const FlutterSecureStorage();
     _initializeUser();
   }
@@ -145,6 +154,7 @@ class _HomeScreenState extends State<HomeScreen> {
               accountName: user.name,
             ),
             onSessionExpired: () => _expireBorrowerSession(token),
+            onLoanApplicationRequested: (reference) => _openLoanSelection(token, reference),
           ),
         ),
       );
@@ -165,10 +175,28 @@ class _HomeScreenState extends State<HomeScreen> {
           accessToken: token,
           openUpdate: update,
           accountName: accountName,
-          service: widget.borrowerService,
+          service: widget.borrowerService ?? _apiBorrowerService,
         ),
       ),
     );
+  }
+
+  Future<void> _openLoanSelection(String token, String reference) async {
+    if (_loanSelectionOpen || _accessToken != token || reference.trim().isEmpty) return;
+    _loanSelectionOpen = true;
+    try {
+      await Navigator.of(context).push<void>(MaterialPageRoute(
+        settings: const RouteSettings(name: '/offer'),
+        builder: (_) => LoanSelectionScreen(
+          accessToken: token,
+          offerReference: reference,
+          service: widget.loanQuoteService,
+          onSessionExpired: () => _expireBorrowerSession(token),
+        ),
+      ));
+    } finally {
+      _loanSelectionOpen = false;
+    }
   }
 
   Future<void> _expireBorrowerSession(String token) async {

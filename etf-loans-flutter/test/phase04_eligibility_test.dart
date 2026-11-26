@@ -140,8 +140,9 @@ void main() {
       service.requests.single.complete(_syntheticApproved);
       await tester.pumpAndSettle();
       expect(find.text('Your eligibility result'), findsOneWidget);
+      await _tap(tester, 'Choose loan amount');
       expect(
-        find.text('Loan selection is currently unavailable.'),
+        find.text('Loan options are currently unavailable.'),
         findsOneWidget,
       );
     },

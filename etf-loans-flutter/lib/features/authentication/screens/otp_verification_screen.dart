@@ -69,9 +69,11 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
   String? _developmentOtp;
   OtpState _state = OtpState.empty;
   String? _errorMessage;
+  String? _resendErrorMessage;
   String? _statusMessage;
   int _resendCountdown = 0;
   bool _isResending = false;
+  bool _verifyAfterResend = false;
   bool _verificationInProgress = false;
 
   late final AnimationController _caretController;
@@ -191,6 +193,11 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
         }
       });
 
+      if (_isResending) {
+        _verifyAfterResend = _otp.length == 6;
+        return;
+      }
+
       // Trigger verification only when OTP is complete and not already verifying
       if (_otp.length == 6 && 
           _state != OtpState.checking && 
@@ -219,6 +226,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
     setState(() {
       _verificationInProgress = true;
       _state = OtpState.checking;
+      _resendErrorMessage = null;
     });
     _checkController.forward(from: 0);
 
@@ -297,7 +305,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
       _showError('Invalid session. Please request a new code.');
       return;
     }
-    setState(() => _isResending = true);
+    setState(() {
+      _isResending = true;
+      _resendErrorMessage = null;
+    });
 
     try {
       final response = await _authService.resendChallenge(
@@ -306,8 +317,6 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
         challengeId: previous,
       );
       if (!mounted) return;
-
-      setState(() => _isResending = false);
 
       final challengeId = response.challengeId;
       if (response.success && challengeId != null && challengeId.isNotEmpty) {
@@ -326,18 +335,23 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
       }
     } on AppError catch (e) {
       if (!mounted) return;
-      setState(() => _isResending = false);
       _showError(e.message);
     } catch (_) {
       if (!mounted) return;
-      setState(() => _isResending = false);
       _showError('Failed to resend code. Please try again.');
+    } finally {
+      if (mounted) {
+        final verify = _verifyAfterResend;
+        _verifyAfterResend = false;
+        setState(() => _isResending = false);
+        if (verify) _verifyOtp();
+      }
     }
   }
 
   void _showError(String message) {
     setState(() {
-      _errorMessage = message;
+      _resendErrorMessage = message;
       _statusMessage = null;
     });
   }
@@ -400,7 +414,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
                           const SizedBox(height: 24),
                           _buildHeading(),
                           const SizedBox(height: 36),
-                          _buildOtpTiles(tileSize, tileGap, digitFontSize),
+                          _buildOtpInput(tileSize, tileGap, digitFontSize),
                           const SizedBox(height: 18),
                           _buildStatus(),
                           const SizedBox(height: 18),
@@ -412,36 +426,6 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
                   ),
                 ),
               ],
-            ),
-          ),
-          // Hidden input for autofill
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Opacity(
-                opacity: 0,
-                child: TextField(
-                  controller: _hiddenController,
-                  focusNode: _hiddenFocusNode,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(6),
-                  ],
-                  autofillHints: const [AutofillHints.oneTimeCode],
-                  maxLength: 6,
-                  decoration: const InputDecoration(
-                    border: InputBorder.none,
-                    counterText: '',
-                  ),
-                  style: const TextStyle(
-                    color: Colors.transparent,
-                    fontSize: 16,
-                  ),
-                  cursorColor: Colors.transparent,
-                  enableSuggestions: false,
-                  autocorrect: false,
-                ),
-              ),
             ),
           ),
         ],
@@ -574,6 +558,39 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
     );
   }
 
+  Widget _buildOtpInput(double tileSize, double tileGap, double digitFontSize) {
+    return Stack(
+      children: [
+        ExcludeSemantics(child: _buildOtpTiles(tileSize, tileGap, digitFontSize)),
+        Positioned.fill(
+          child: Opacity(
+            opacity: 0,
+            alwaysIncludeSemantics: true,
+            child: Semantics(
+              label: 'Verification code',
+              child: TextField(
+                controller: _hiddenController,
+                focusNode: _hiddenFocusNode,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(6),
+                ],
+                autofillHints: const [AutofillHints.oneTimeCode],
+                textAlignVertical: TextAlignVertical.center,
+                decoration: const InputDecoration.collapsed(hintText: ''),
+                style: const TextStyle(color: Colors.transparent),
+                showCursor: false,
+                enableSuggestions: false,
+                autocorrect: false,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildOtpTiles(double tileSize, double tileGap, double digitFontSize) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -607,7 +624,6 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(6, (index) {
               final digit = index < _otp.length ? _otp[index] : '';
-              final isActive = _state == OtpState.typing && index == _otp.length && _otp.length < 6;
               final isFilled = index < _otp.length;
               final isError = _state == OtpState.error;
               final isSuccess = _state == OtpState.success;
@@ -619,12 +635,15 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
                   _checkController,
                   _errorController,
                   _successController,
+                  _hiddenFocusNode,
                 ]),
                 builder: (context, child) {
                   return _OtpTile(
                     index: index,
                     digit: digit,
-                    isActive: isActive,
+                    isActive: _hiddenFocusNode.hasFocus &&
+                        (_state == OtpState.empty || _state == OtpState.typing) &&
+                        index == _otp.length,
                     isFilled: isFilled,
                     isError: isError,
                     isSuccess: isSuccess,
@@ -662,6 +681,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
           );
         },
       );
+    }
+
+    if (_resendErrorMessage case final message?) {
+      return _StatusIndicator.error(message);
     }
 
     if (_state == OtpState.error) {

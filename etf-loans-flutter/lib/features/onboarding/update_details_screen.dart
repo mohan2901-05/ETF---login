@@ -54,7 +54,7 @@ class _UpdateDetailsScreenState extends State<UpdateDetailsScreen> {
         Navigator.of(context).pop(BorrowerFlowResult.recheckEligibility);
     } on InvalidSessionException {
       if (mounted) Navigator.of(context).pop(BorrowerFlowResult.sessionExpired);
-    } on BorrowerServiceUnavailable catch (error) {
+    } on BorrowerRequestException catch (error) {
       if (mounted) setState(() => _error = error.message);
     } catch (_) {
       if (mounted)

@@ -113,6 +113,7 @@ class BorrowerInput extends StatelessWidget {
     required this.controller,
     required this.validator,
     this.enabled = true,
+    this.obscureText = false,
     this.hint,
     this.helper,
     this.prefix,
@@ -126,6 +127,7 @@ class BorrowerInput extends StatelessWidget {
   final TextEditingController controller;
   final FormFieldValidator<String> validator;
   final bool enabled;
+  final bool obscureText;
   final String? hint;
   final String? helper;
   final String? prefix;
@@ -139,6 +141,7 @@ class BorrowerInput extends StatelessWidget {
       controller: controller,
       validator: validator,
       enabled: enabled,
+      obscureText: obscureText,
       keyboardType: keyboardType,
       textCapitalization: capitalization,
       textInputAction: TextInputAction.next,
@@ -203,6 +206,13 @@ class FinanceFieldsState extends State<FinanceFields> {
             constraints: BoxConstraints(minHeight: ThemeConfig.inputHeight),
             contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           ),
+          selectedItemBuilder: (context) => [
+            for (final type in EmploymentType.values)
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(type.label),
+              ),
+          ],
           items: [
             for (final type in EmploymentType.values)
               DropdownMenuItem(
@@ -213,7 +223,9 @@ class FinanceFieldsState extends State<FinanceFields> {
                 ),
               ),
           ],
-          onChanged: widget.enabled ? (value) => _employment = value : null,
+          onChanged: widget.enabled
+              ? (value) => setState(() => _employment = value)
+              : null,
           validator: (value) =>
               value == null ? 'Choose your employment type.' : null,
         ),

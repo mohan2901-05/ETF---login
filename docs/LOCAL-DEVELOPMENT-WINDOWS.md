@@ -30,6 +30,22 @@ Stop checks the recorded workspace, executable, process ID and creation time. St
 
 The workspace also supplies VS Code-format tasks under `.vscode/tasks.json`. Use them if Antigravity exposes **Tasks: Run Task**. The PowerShell commands work independently of the IDE.
 
+## Borrower profile and PAN
+
+Provision the isolated development database through V3 before starting this backend. The borrower migration is in `classpath:db/borrower-local`. For an isolated database already tracked by Flyway at V2, run Flyway with both `classpath:db/migration` and `classpath:db/borrower-local` using its migration owner. Local backend startup keeps Flyway disabled and validates the resulting schema.
+
+For an existing `etf_loans_device` database provisioned without Flyway history, first verify that it is on loopback and that its authentication schema matches V1 and V2. As the migration owner, run Flyway `baseline` with `baselineVersion=2`, then run `migrate` and `validate` with both locations. This records the existing schema without rerunning the authentication migrations.
+
+The isolated runtime role needs `SELECT`, `INSERT`, and `UPDATE` on `public.borrower_profiles`. Have the migration owner apply those table-level grants after approval.
+
+To test the profile flow with synthetic data, set `$env:ETF_PAN_SYNTHETIC_ENABLED = 'true'` before starting a fresh local backend process. Use **Synthetic Borrower**, **13/02/1990**, **`ZZZZZ0000Z`**, and check PAN consent. The synthetic adapter accepts that PAN only. A successful save allows the app to proceed to the eligibility screen, where an authoritative eligibility service is still pending.
+
+For Chrome testing, start the backend with `-SkipPhone`, then run this command from `etf-loans-flutter`. The backend allows the fixed Chrome origin `http://127.0.0.1:7357`.
+
+```powershell
+& 'D:\tools\flutter\flutter\bin\flutter.bat' --no-version-check run -d chrome --no-pub --web-hostname=127.0.0.1 --web-port=7357 --dart-define=API_BASE_URL=http://127.0.0.1:8080
+```
+
 ## Verification status
 
 DEV-01 and DEV-01A backend automation passed live verification. Two start/stop cycles reached HTTP health, a repeated start reused the tracked Java process, and both scripts refused an unrelated port listener. Hibernate validated the schema with startup Flyway disabled.

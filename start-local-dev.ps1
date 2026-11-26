@@ -72,7 +72,7 @@ try {
             ETF_DEVICE_DB_URL = $device.url; ETF_DEVICE_DB_USERNAME = $device.username
             ETF_DEVICE_DB_PASSWORD = $password; ETF_DEV_OTP_KEY = $key
             ETF_OTP_MOCK_CODE = $MockOtpCode; ETF_LOCAL_OTP_COOLDOWN_SECONDS = [string]$CooldownSeconds
-            CORS_ALLOWED_ORIGINS = 'http://127.0.0.1:8080'
+            CORS_ALLOWED_ORIGINS = 'http://127.0.0.1:8080,http://127.0.0.1:7357'
             SPRING_DATASOURCE_URL = $null; SPRING_DATASOURCE_USERNAME = $null; SPRING_DATASOURCE_PASSWORD = $null
         }
         $previous = @{}

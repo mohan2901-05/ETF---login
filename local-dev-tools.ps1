@@ -67,6 +67,19 @@ function Get-DevBackend {
     $process
 }
 
+function Stop-DevBackend($Process) {
+    if ($Process.ProcessName -ieq 'java') {
+        $Process.Kill()
+        if (!$Process.WaitForExit(5000)) { throw 'The recorded backend Java process did not exit.' }
+    } else {
+        & "$env:SystemRoot\System32\taskkill.exe" /PID $Process.Id /T /F | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not stop the recorded legacy workspace process tree.' }
+    }
+    for ($i = 0; $i -lt 10 -and (Test-DevPort); $i++) { Start-Sleep -Milliseconds 300 }
+    if (Test-DevPort) { throw 'Port 8080 still has a listener. Inspect it before restarting.' }
+    Remove-Item -LiteralPath $DevState
+}
+
 function Get-DevBackendJar([string]$BackendDirectory, [string]$Maven) {
     $pomPath = Join-Path $BackendDirectory 'pom.xml'
     [xml]$pom = Get-Content -LiteralPath $pomPath -Raw

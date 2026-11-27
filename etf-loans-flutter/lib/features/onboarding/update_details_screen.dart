@@ -73,8 +73,7 @@ class _UpdateDetailsScreenState extends State<UpdateDetailsScreen> {
     final details = profile?.details;
     final birthDate = details == null
         ? null
-        : MaterialLocalizations.of(context)
-              .formatMediumDate(details.dateOfBirth);
+        : MaterialLocalizations.of(context).formatFullDate(details.dateOfBirth);
 
     return BorrowerPage(
       title: 'Update details',

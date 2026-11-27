@@ -11,7 +11,9 @@ param(
     [ValidateRange(5, 300)][int]$StartupTimeoutSeconds = 75,
     [switch]$SkipPhone,
     [switch]$HideOtp,
-    [switch]$SyntheticAccountsOnly
+    [switch]$SyntheticAccountsOnly,
+    [ValidateSet('financial-fixture', 'eligible', 'ineligible', 'failure')]
+    [string]$EligibilityScenario = 'financial-fixture'
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\local-dev-tools.ps1"
@@ -24,9 +26,16 @@ try {
         if (!(Test-DevHealth)) {
             throw "The workspace backend is running but unhealthy. Check $DevData\backend.err.log and backend.out.log before stopping it."
         }
-        Write-Host 'Reusing the healthy workspace backend.'
+        $state = Get-Content -LiteralPath $DevState -Raw | ConvertFrom-Json
+        if ($state.providerConfiguration -ne 1 -or $state.eligibilityScenario -ine $EligibilityScenario) {
+            Write-Host 'Restarting the tracked workspace backend to apply the local provider settings.'
+            Stop-DevBackend $process
+            $process = $null
+        }
+    }
+    if ($process) {
+        Write-Host "Reusing the healthy workspace backend. Eligibility fixture: $EligibilityScenario."
         if (!$HideOtp) {
-            $state = Get-Content -LiteralPath $DevState -Raw | ConvertFrom-Json
             if ($state.mockOtp) {
                 $otp = ConvertTo-SecureString -String $state.mockOtp
                 Write-Host "Synthetic development OTP for this session: $([Net.NetworkCredential]::new('', $otp).Password)"
@@ -79,55 +88,68 @@ try {
         $arguments = @('-jar', ('"' + $jar + '"'), '--spring.profiles.active=local',
             '--server.address=127.0.0.1', '--server.port=8080',
             '--spring.flyway.enabled=false', '--spring.jpa.hibernate.ddl-auto=validate',
-            '--etf.otp.mock-enabled=true', '--etf.demo.enabled=false')
-        try {
-            foreach ($name in $childEnv.Keys) {
-                $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
-                [Environment]::SetEnvironmentVariable($name, $childEnv[$name], 'Process')
-            }
-            if (Test-DevPort) { throw 'Port 8080 was occupied during packaging. No backend was launched.' }
-            for ($attempt = 1; $attempt -le 2; $attempt++) {
-                try {
-                    $process = Start-Process -WindowStyle Hidden -PassThru -FilePath $java `
-                        -ArgumentList $arguments -WorkingDirectory $backend `
-                        -RedirectStandardOutput (Join-Path $DevData 'backend.out.log') `
-                        -RedirectStandardError (Join-Path $DevData 'backend.err.log')
-                    break
-                } catch {
-                    if ($attempt -eq 2 -or (Test-DevPort)) { throw }
-                    Write-Warning 'Windows could not start the Java process. Retrying once.'
-                }
-            }
-        } finally {
-            foreach ($name in $previous.Keys) {
-                [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
-            }
-        }
-        if ($process.HasExited) { throw "Backend exited during launch. Check $DevData\backend.err.log and backend.out.log." }
+            '--etf.otp.mock-enabled=true', '--etf.demo.enabled=false', '--etf.pan.synthetic-enabled=true',
+            '--etf.eligibility.synthetic-enabled=true', "--etf.eligibility.synthetic-scenario=$EligibilityScenario")
         $protectedOtp = ConvertFrom-SecureString (ConvertTo-SecureString $MockOtpCode -AsPlainText -Force)
-        @{workspace=$DevRoot; pid=$process.Id; executable=$java; started=$process.StartTime.ToUniversalTime().Ticks.ToString(); mockOtp=$protectedOtp} |
-            ConvertTo-Json | Set-Content -LiteralPath $DevState
         $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
-        $healthy = $false
-        do {
-            if ($process.HasExited) { break }
-            if (Test-DevHealth) { $healthy = $true; break }
-            Start-Sleep -Seconds 1
-        } while ([DateTime]::UtcNow -lt $deadline)
-        if (!$healthy) {
-            if ($process.HasExited) {
-                $process.WaitForExit()
-                Remove-Item -LiteralPath $DevState
-                $startupLog = Join-Path $DevData 'backend.out.log'
-                if (Select-String -LiteralPath $startupLog -Pattern 'the database system is in recovery mode' -Quiet) {
-                    throw "PostgreSQL entered recovery during backend startup. Wait until it accepts connections and retry. See $startupLog."
+        $startupLog = Join-Path $DevData 'backend.out.log'
+        for ($startup = 1; ; $startup++) {
+            try {
+                foreach ($name in $childEnv.Keys) {
+                    $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+                    [Environment]::SetEnvironmentVariable($name, $childEnv[$name], 'Process')
                 }
-                $reason = 'exited before health was available'
-                if ($null -ne $process.ExitCode) { $reason += " (exit $($process.ExitCode))" }
-            } else { $reason = 'did not become healthy before the timeout' }
-            throw "Workspace backend $reason. Inspect $DevData\backend.err.log and backend.out.log. Use stop-local-dev.ps1 before retrying a running process."
+                if (Test-DevPort) { throw 'Port 8080 already has a listener. No backend was launched.' }
+                for ($attempt = 1; $attempt -le 2; $attempt++) {
+                    try {
+                        $process = Start-Process -WindowStyle Hidden -PassThru -FilePath $java `
+                            -ArgumentList $arguments -WorkingDirectory $backend `
+                            -RedirectStandardOutput $startupLog `
+                            -RedirectStandardError (Join-Path $DevData 'backend.err.log')
+                        if (!$process) { throw 'Windows did not return a backend process.' }
+                        break
+                    } catch {
+                        if ($attempt -eq 2 -or (Test-DevPort)) { throw }
+                        Write-Warning 'Windows could not start the Java process. Retrying once.'
+                    }
+                }
+            } finally {
+                foreach ($name in $previous.Keys) {
+                    [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
+                }
+            }
+            $healthy = $false
+            if (!$process.HasExited) {
+                @{workspace=$DevRoot; pid=$process.Id; executable=$java; started=$process.StartTime.ToUniversalTime().Ticks.ToString()
+                    mockOtp=$protectedOtp; providerConfiguration=1; eligibilityScenario=$EligibilityScenario} |
+                    ConvertTo-Json | Set-Content -LiteralPath $DevState
+                do {
+                    if ($process.HasExited) { break }
+                    if (Test-DevHealth) { $healthy = $true; break }
+                    Start-Sleep -Seconds 1
+                } while ([DateTime]::UtcNow -lt $deadline)
+            }
+            if ($healthy) { break }
+            if (!$process.HasExited) {
+                throw "Workspace backend did not become healthy before the timeout. Inspect $DevData\backend.out.log and backend.err.log."
+            }
+            $process.WaitForExit()
+            if (Test-Path -LiteralPath $DevState) { Remove-Item -LiteralPath $DevState }
+            if (!(Select-String -LiteralPath $startupLog -Pattern 'the database system is in recovery mode' -Quiet)) {
+                throw "Workspace backend exited before health was available (exit $($process.ExitCode)). Inspect $DevData\backend.err.log and backend.out.log."
+            }
+            if ($startup -ge 3) { throw "PostgreSQL repeatedly entered recovery during startup. See $startupLog." }
+            Write-Warning 'PostgreSQL entered recovery during startup. Waiting for it before retrying.'
+            while ([DateTime]::UtcNow -lt $deadline) {
+                & $pg -q -h 127.0.0.1 -p $dbPort -t 2
+                if ($LASTEXITCODE -eq 0) { break }
+                Start-Sleep -Seconds 1
+            }
+            if ([DateTime]::UtcNow -ge $deadline) {
+                throw "PostgreSQL did not finish recovery within the startup timeout. See $startupLog."
+            }
         }
-        Write-Host "Workspace backend is healthy. Local OTP cooldown: $CooldownSeconds seconds."
+        Write-Host "Workspace backend is healthy. Local OTP cooldown: $CooldownSeconds seconds. Eligibility fixture: $EligibilityScenario."
         if (!$HideOtp) { Write-Host "Synthetic development OTP for this session: $MockOtpCode" }
     }
     if (!$SkipPhone) {

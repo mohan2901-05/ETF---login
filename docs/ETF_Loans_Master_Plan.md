@@ -32,9 +32,9 @@ Some entries may become dialogs or reusable views rather than standalone routes.
 | ETF-009 | Auth | Set new password | Internally accepted on POCO F4 |
 | ETF-010 | Onboarding | Personal details | Local profile persistence and employment selection accepted on Chrome. Full reference and Android acceptance pending. |
 | ETF-011 | Onboarding | PAN verification | Synthetic verification and consent accepted on Chrome. Approved PAN provider, full reference and Android acceptance pending. |
-| ETF-012 | Eligibility | Checking eligibility | Flutter UI implemented. Eligibility service integration pending. Site map reference. |
-| ETF-013 | Eligibility | Credit score and eligibility result | Flutter UI implemented. Authoritative results and offer integration pending. Screenshot unavailable in the repository. |
-| ETF-014 | Profile | Update income and details | Financial updates and persistence accepted on Chrome. Authoritative eligibility recheck, reference screenshot and Android acceptance pending. |
+| ETF-012 | Eligibility | Checking eligibility | BE-03 wires separate consent, authenticated polling and retry. Manual Chrome acceptance pending. |
+| ETF-013 | Eligibility | Credit score and eligibility result | BE-03 renders server decisions and revalidates offers for the ETF-023 handoff. Approved production provider and reference screenshot pending. |
+| ETF-014 | Profile | Update income and details | Financial persistence accepted on Chrome in BE-01/02. BE-03 connects confirmed saves to a new consent and recheck. Android acceptance pending. |
 | ETF-015 | Verification | Face verification instructions | Flutter instructions and consent UI implemented. Approved consent and provider integration pending. |
 | ETF-016 | Verification | Live face check | Preview, permission, capture and processing UI implemented. Camera adapter pending. |
 | ETF-017 | Verification | Face verification result | Flutter result UI implemented. Authoritative provider responses pending. |
@@ -158,7 +158,7 @@ BE-01, BE-02, BE-01A and BE-01B are complete for isolated local Chrome developme
 - Six profile API tests passed on isolated PostgreSQL, and the focused V2-to-V3 preservation test passed. The H2 run recorded 53 passed and seven skipped. Live smoke tests verified synthetic PAN acceptance, profile creation and retrieval, financial updates, duplicate handling, ownership isolation and rejection of identity changes. The synthetic PAN provider is opt-in for isolated local/test profiles. An approved live PAN provider is pending.
 - ETF-012 presents progress, unavailable and retryable failure states. Authenticated Home starts an initial check only after confirmed PAN verification and profile persistence. A recheck starts only after ETF-014 confirms a save. An expired session takes the borrower to sign-in.
 - ETF-013 presents the service’s decision and any supplied score, credit band, date, source, factors, approved limit and affordable monthly EMI. ETF-014 is accessible from the result. The Phase 05 handoff opens loan selection only for an eligible result with a server-issued offer reference.
-- Authoritative eligibility and offer data remain pending. Synthetic eligibility data is confined to widget tests and the debug QA preview. BE-03 remains pending.
+- BE-03 connects the eligibility and offer states to the authenticated backend. The result displays a synthetic label when using a local fixture.
 - Targeted Dart analysis found zero errors or warnings for the onboarding adapter and corrections. The Chrome widget harness stalled during Flutter bootstrap, and the desktop runner exited during native asset setup. The AUTH-12 regression, seven onboarding widget tests and six eligibility widget tests await successful execution. Android acceptance of the integrated onboarding flow and OTP correction and rendered reference comparisons remain pending.
 
 ## 15. Phase 05 implementation status
@@ -183,7 +183,31 @@ BE-01, BE-02, BE-01A and BE-01B are complete for isolated local Chrome developme
 
 - `etf-loans-flutter/tool/borrower_preview.dart` is a debug-only entry point for ETF-010 through ETF-026. It injects synthetic scenarios and does not connect to the backend. Manual Chrome acceptance used the normal application with the isolated backend.
 
-## 19. Working references
+## 19. BE-03 eligibility backend and Flutter integration
+
+- V4 adds `financial_revision` and `eligibility_assessments`. Financial changes advance the revision. Assessment and offer lookups reject expired records, stale revisions and foreign owners. Reused assessments retain each submission’s key and consent independently.
+- Bearer-authenticated POST and GET at `/api/borrower/eligibility/assessments` and `/api/borrower/eligibility/assessments/{id}` return 202 with Location, 200 for a current result, 404 for missing or foreign assessments, 410 for stale or expired assessments, 409 for prerequisite or key conflicts, and 503 for provider unavailability.
+- A profile lock guards reservation and publication. Provider work runs outside database transactions with a five-second timeout, a twenty-second reservation deadline and a 24-hour result lifetime. These are operational defaults. The explicitly enabled eligible, ineligible and failure fixtures run against isolated local or test data. An approved production credit provider is pending.
+- Isolated PostgreSQL passed 68 tests, including V1–V4 preservation, ownership, consent, concurrency, expiry and offers. H2 passed 60 tests with eight PostgreSQL-only skips. Flyway applied V4 to `etf_loans_device` and preserved the existing profile and authentication rows. The runtime grant allows SELECT, INSERT and updates to mutable lifecycle and result columns.
+- Live HTTP checks passed on `etf_loans_device` for health, the eligible, ineligible and failure fixtures, and the disabled provider. The eligible check covered replay, foreign ownership and expiry after a financial change.
+- ETF-012/013 and ETF-014 use the real eligibility APIs. ETF-023 opens after a server revalidation of the offer. See [Windows local development](LOCAL-DEVELOPMENT-WINDOWS.md#eligibility-in-chrome) for manual acceptance. Quote integration remains in BE-04.
+- Targeted Dart analysis completed with zero errors and warnings and six SDK deprecation notices. Three adapter scenarios passed on the Dart VM. The Dart client also verified consent, polling, offer validation and a financial recheck against the running device backend. The Flutter desktop runner failed in a native-asset hook, and the Chrome test iframe stalled during startup. Widget execution and rendered comparison with the screen references remain pending.
+
+### BE-03B reassessment and stale offers
+
+- PostgreSQL showed that the fixed synthetic provider returned identical amounts on distinct financial revisions and offer references. The optional `financial-fixture` uses exact income and EMI test tuples and stays behind the existing isolated provider guard.
+- The original Chrome build returned HTTP 410 when selecting a stale offer from the result screen. An already-open ETF-023 stayed visible on tab return without another server check. The corrected build requests a fresh response before opening ETF-023 and when an open selection returns to the foreground. A stale result clears the offer and requires fresh consent, a new idempotency key and a recheck.
+- Nine focused backend tests passed. Live Dart and PostgreSQL checks verified revisions 0, 1 and 2, distinct assessment and offer IDs, distinct amounts, and HTTP 410 for both superseded assessments. [Two-tab Chrome retest](LOCAL-DEVELOPMENT-WINDOWS.md#eligibility-in-chrome)
+- Two actual Chrome tabs passed against `etf_loans_device`. Clicking a stale result hit a live GET 410 and kept ETF-023 closed. Resuming an already-open ETF-023 after an EMI update also hit a live GET 410, closed the screen and requested fresh consent. A current offer opened ETF-023 after a GET 200. The database showed assessment and offer prefixes `e657f249/e425ab43` (revision 0), `6c0759ed/52b7eb66` (revision 1) and `98b426e5/ceb6b4c2` (revision 2).
+
+### BE-03C and QA-02/03 acceptance
+
+- The reported QA-03 manual run recorded 18 passes across authentication, onboarding and the four original financial fixtures. Subsequent attempts with ₹48,000 income and ₹6,000 EMI failed within 31–71 ms because the synthetic provider used an exact-pair lookup. This was separate from the earlier reported 15 pass, 22 fail and one pending run.
+- BE-03C replaced the lookup with a development-only paise calculation that preserves the four fixture results. The focused backend run passed 16 tests. Nine live device PostgreSQL cases passed, including ₹60,000 income and ₹10,000 EMI, decimal and boundary inputs, and repeat requests. Normal Chrome verified stale-offer HTTP 410 on click and tab resume. V4 remained unchanged.
+- QA-02 verified persisted launcher defaults, authenticated API smoke, the normal Chrome app on port 7357 and all 18 debug-preview entries. QA-03 verified normal Chrome with fresh and existing synthetic borrowers, fixed sign-in route session restoration and the DOB year, and added bounded startup retry for PostgreSQL recovery. Three launcher regressions passed. The Flutter widget runner was blocked by Windows access to Android Studio's Java executable.
+- An approved production provider and ETF-023 loan options remain pending.
+
+## 20. Working references
 - ETF Loans website: https://etf-loans.vercel.app/
 - ETF Loans Site Map.html (14 November 2026)
 - User-provided screenshot batches: IMG_2681 through IMG_2724 (including welcome, sign-in, result, offer, review, checklist, Home, Loans, Profile, account/recovery, update, Aadhaar, face, address/work, deletion, notifications and legal pages).

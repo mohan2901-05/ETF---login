@@ -145,6 +145,7 @@ void main() {
       await _openFlow(tester, service, onResult: (value) => result = value);
       expect(find.text('Update details'), findsOneWidget);
       expect(find.text('Asha Rao'), findsOneWidget);
+      expect(find.textContaining('1990'), findsOneWidget);
       expect(find.text('••••••234F'), findsOneWidget);
       expect(_field('Full name'), findsNothing);
       expect(_field('PAN'), findsNothing);

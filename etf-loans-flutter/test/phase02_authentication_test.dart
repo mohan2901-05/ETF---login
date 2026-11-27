@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' show PointerDeviceKind;
 
+import 'package:etf_loans/core/constants/app_routes.dart';
 import 'package:etf_loans/core/network/network_service.dart';
 import 'package:etf_loans/features/authentication/models/auth_models.dart';
 import 'package:etf_loans/features/authentication/models/auth_purpose.dart';
@@ -52,17 +54,22 @@ class _NoSessionStorage implements SecureStorage {
 }
 
 void main() {
-  test('HTTP 429 uses Retry-After seconds for the authentication error', () async {
-    final client = MockClient((_) async => http.Response(
-      '{"message":"Generic server error"}',
-      429,
-      headers: {'Retry-After': '10'},
-    ));
-    final network = NetworkService(client: client);
-    addTearDown(network.close);
-    final response = await network.post('/api/auth/password/login/start');
-    expect(response['error'], 'Too many requests. Try again in 10 seconds.');
-  });
+  test(
+    'HTTP 429 uses Retry-After seconds for the authentication error',
+    () async {
+      final client = MockClient(
+        (_) async => http.Response(
+          '{"message":"Generic server error"}',
+          429,
+          headers: {'Retry-After': '10'},
+        ),
+      );
+      final network = NetworkService(client: client);
+      addTearDown(network.close);
+      final response = await network.post('/api/auth/password/login/start');
+      expect(response['error'], 'Too many requests. Try again in 10 seconds.');
+    },
+  );
 
   for (final valid in [false, true]) {
     testWidgets(
@@ -132,51 +139,61 @@ void main() {
   }
 
   for (final valid in [true, false]) {
-    testWidgets(
-      valid
-          ? 'restores a validated session'
-          : 'clears an expired stored session',
-      (tester) async {
-        FlutterSecureStorage.setMockInitialValues({
-          'accessToken': 'stored-fixture-token',
-        });
-        addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
-        final auth = AuthenticationService(
-          networkService: NetworkService(
-            client: MockClient((request) async {
-              expect(request.url.path, '/api/auth/me');
-              expect(
-                request.headers['authorization'],
-                'Bearer stored-fixture-token',
-              );
-              return valid
-                  ? http.Response(
-                      '{"id":"fixture","mobileNumber":"9590000000","fullName":"Test User"}',
-                      200,
-                    )
-                  : http.Response(
-                      '{"message":"Invalid or expired token"}',
-                      401,
-                    );
-            }),
-          ),
-        );
-        addTearDown(auth.close);
-        await tester.pumpWidget(ETFLoansApp(authenticationService: auth));
-        await tester.pumpAndSettle();
-        const storage = FlutterSecureStorage();
-        if (valid) {
-          expect(find.byType(HomeScreen), findsOneWidget);
-          expect(
-            await storage.read(key: 'accessToken'),
-            'stored-fixture-token',
+    for (final route in ['/', AppRoutes.signIn]) {
+      testWidgets(
+        valid
+            ? 'restores a validated session from $route'
+            : 'clears an expired stored session from $route',
+        (tester) async {
+          tester.binding.platformDispatcher.defaultRouteNameTestValue = route;
+          addTearDown(
+            tester.binding.platformDispatcher.clearDefaultRouteNameTestValue,
           );
-        } else {
-          expect(find.byType(WelcomeScreen), findsOneWidget);
-          expect(await storage.read(key: 'accessToken'), isNull);
-        }
-      },
-    );
+          FlutterSecureStorage.setMockInitialValues({
+            'accessToken': 'stored-fixture-token',
+          });
+          addTearDown(() => FlutterSecureStorage.setMockInitialValues({}));
+          final auth = AuthenticationService(
+            networkService: NetworkService(
+              client: MockClient((request) async {
+                expect(request.url.path, '/api/auth/me');
+                expect(
+                  request.headers['authorization'],
+                  'Bearer stored-fixture-token',
+                );
+                return valid
+                    ? http.Response(
+                        '{"id":"fixture","mobileNumber":"9590000000","fullName":"Test User"}',
+                        200,
+                      )
+                    : http.Response(
+                        '{"message":"Invalid or expired token"}',
+                        401,
+                      );
+              }),
+            ),
+          );
+          addTearDown(auth.close);
+          await tester.pumpWidget(ETFLoansApp(authenticationService: auth));
+          await tester.pumpAndSettle();
+          const storage = FlutterSecureStorage();
+          if (valid) {
+            expect(find.byType(HomeScreen), findsOneWidget);
+            expect(
+              await storage.read(key: 'accessToken'),
+              'stored-fixture-token',
+            );
+          } else {
+            if (route == AppRoutes.signIn) {
+              expect(find.byType(LoginScreen), findsOneWidget);
+            } else {
+              expect(find.byType(WelcomeScreen), findsOneWidget);
+            }
+            expect(await storage.read(key: 'accessToken'), isNull);
+          }
+        },
+      );
+    }
   }
 
   testWidgets('sign-in keeps legacy OTP available and opens recovery', (
@@ -199,6 +216,39 @@ void main() {
     await tester.tap(find.text('Send code'));
     await tester.pumpAndSettle();
     expect(find.text('Enter a valid 10-digit mobile number'), findsOneWidget);
+  });
+
+  testWidgets('a mouse click on the OTP tiles refocuses the code field', (
+    tester,
+  ) async {
+    final auth = _OtpService();
+    addTearDown(auth.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OtpVerificationScreen(
+          mobileNumber: '9100000020',
+          challengeId: 'initial',
+          purpose: AuthPurpose.recovery,
+          authenticationService: auth,
+          secureStorage: _NoSessionStorage(),
+          passwordScreen: (_) => const Scaffold(body: Text('Password setup')),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    final finder = find.byType(TextField);
+    final focus = tester.widget<TextField>(finder).focusNode!;
+    focus.unfocus();
+    await tester.pump();
+    final target = tester.getRect(finder).centerRight - const Offset(12, 0);
+    await tester.tapAt(target, kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(focus.hasFocus, isTrue);
+    tester.testTextInput.enterText('123456');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(auth.challengeIds, ['initial']);
+    expect(find.text('Password setup'), findsOneWidget);
   });
 
   for (final width in [360.0, 390.0, 412.0]) {
@@ -302,7 +352,9 @@ void main() {
       field.focusNode!.unfocus();
       await tester.pump();
       await tester.ensureVisible(input);
-      await tester.tapAt(tester.getRect(input).centerRight - const Offset(30, 0));
+      await tester.tapAt(
+        tester.getRect(input).centerRight - const Offset(30, 0),
+      );
       await tester.pump();
       expect(field.focusNode!.hasFocus, isTrue);
       tester.testTextInput.updateEditingValue(

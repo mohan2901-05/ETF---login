@@ -28,7 +28,10 @@ class ETFLoansApp extends StatelessWidget {
       themeMode: ThemeMode.light,
       home: _SessionEntry(authenticationService),
       routes: {
-        AppRoutes.signIn: (_) => const LoginScreen(),
+        AppRoutes.signIn: (_) => _SessionEntry(
+          authenticationService,
+          child: LoginScreen(authenticationService: authenticationService),
+        ),
         AppRoutes.terms: (_) => const TermsScreen(),
         AppRoutes.privacy: (_) => const PrivacyScreen(),
       },
@@ -38,9 +41,13 @@ class ETFLoansApp extends StatelessWidget {
 }
 
 class _SessionEntry extends StatefulWidget {
-  const _SessionEntry(this.authenticationService);
+  const _SessionEntry(
+    this.authenticationService, {
+    this.child = const WelcomeScreen(),
+  });
 
   final AuthenticationService? authenticationService;
+  final Widget child;
 
   @override
   State<_SessionEntry> createState() => _SessionEntryState();
@@ -57,6 +64,7 @@ class _SessionEntryState extends State<_SessionEntry> {
   }
 
   Future<void> _restore() async {
+    if (!mounted || ModalRoute.isCurrentOf(context) != true) return;
     String? token;
     try {
       token = await _storage.read(key: 'accessToken');
@@ -88,5 +96,5 @@ class _SessionEntryState extends State<_SessionEntry> {
   }
 
   @override
-  Widget build(BuildContext context) => const WelcomeScreen();
+  Widget build(BuildContext context) => widget.child;
 }

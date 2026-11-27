@@ -65,7 +65,8 @@ jobs:
           ORG_GRADLE_PROJECT_etfArm64Only: 'true'
           GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx3g -Dorg.gradle.workers.max=2'
         run: |
-          # Flutter supplies the wrapper launcher. The checked-in wrapper pins Gradle 9.3.1.
+          # Flutter 3.50.1 requires at least AGP 9.1.1 and Gradle 9.3.1.
+          # Flutter supplies the launcher for the checked-in Gradle wrapper configuration.
           test ! -e build/app/outputs/flutter-apk/app-debug.apk
           touch "$RUNNER_TEMP/apk-build-start"
           flutter build apk --debug --no-pub --target-platform=android-arm64 \

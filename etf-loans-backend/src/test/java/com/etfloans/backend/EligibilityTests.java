@@ -9,6 +9,7 @@ import com.etfloans.backend.service.EligibilityProvider;
 import com.etfloans.backend.service.EligibilityService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -43,7 +44,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@SpringBootTest(properties = {"etf.eligibility.synthetic-enabled=true", "etf.eligibility.synthetic-scenario=eligible"})
+@SpringBootTest(properties = {"etf.eligibility.synthetic-enabled=true", "etf.eligibility.synthetic-scenario=eligible",
+        "etf.loan-pricing.synthetic-enabled=true"})
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class EligibilityTests {
@@ -59,6 +61,106 @@ class EligibilityTests {
     @Autowired ObjectMapper json;
     @Autowired EligibilityService eligibility;
     @MockitoSpyBean EligibilityProvider provider;
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "ETF_PHASE02_POSTGRES", matches = "true")
+    void quoteOptionsAndConcurrentCreationEnforceOwnershipAffordabilityAndCurrentRevision() throws Exception {
+        var owner = account(true);
+        var foreign = account(true);
+        String offer = quoteOffer(owner);
+        String endpoint = "/api/borrower/loans/offers/" + offer;
+        mvc.perform(get(endpoint + "/options")).andExpect(status().isUnauthorized());
+        assertEquals(404, getStatus(foreign, endpoint + "/options"));
+        mvc.perform(get(endpoint + "/options").header("Authorization", owner.bearer()))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andExpect(jsonPath("$.options[0].amountPaise").value(1_000_000))
+                .andExpect(jsonPath("$.options[14].amountPaise").value(14_100_025))
+                .andExpect(jsonPath("$.options[14].plans[0].affordabilityNote").isString());
+        quoteRequest(foreign, endpoint, "quote-key", 5_000_000, 6).andExpect(status().isNotFound());
+        quoteRequest(owner, endpoint, "quote-key", 14_100_025, 3).andExpect(status().isUnprocessableEntity());
+        quoteRequest(owner, endpoint, "quote-key", 5_000_001, 6).andExpect(status().isUnprocessableEntity());
+        quoteRequest(owner, endpoint, "quote-key", 5_000_000, 5).andExpect(status().isUnprocessableEntity());
+        mvc.perform(post(endpoint + "/quotes").header("Authorization", owner.bearer())
+                .header("Idempotency-Key", "quote-key").contentType("application/json")
+                .content("{\"amountPaise\":5000000,\"months\":6,\"interestPaise\":0}"))
+                .andExpect(status().isBadRequest());
+
+        var ready = new CountDownLatch(2);
+        var first = CompletableFuture.supplyAsync(() -> raceQuote(owner, endpoint, ready));
+        var second = CompletableFuture.supplyAsync(() -> raceQuote(owner, endpoint, ready));
+        var quote = first.get(10, TimeUnit.SECONDS);
+        assertEquals(quote, second.get(10, TimeUnit.SECONDS));
+        assertEquals(1, jdbc.queryForObject("select count(*) from loan_quotations where profile_id = ?",
+                Integer.class, owner.id()));
+        assertEquals(600_000, quote.path("interestPaise").asLong());
+        assertEquals(933_300, quote.path("regularEmiPaise").asLong());
+        assertEquals(933_500, quote.path("finalEmiPaise").asLong());
+        long payments = 0, principal = 0, interest = 0;
+        for (var installment : quote.path("schedule")) {
+            long amount = installment.path("amountPaise").asLong();
+            long principalPortion = installment.path("principalPaise").asLong();
+            long interestPortion = installment.path("interestPaise").asLong();
+            assertEquals(amount, principalPortion + interestPortion);
+            payments += amount;
+            principal += principalPortion;
+            interest += interestPortion;
+        }
+        assertEquals(5_600_000, payments);
+        assertEquals(5_000_000, principal);
+        assertEquals(600_000, interest);
+        String quotePath = "/api/borrower/loans/quotes/" + quote.path("id").asText();
+        assertEquals(200, getStatus(owner, quotePath));
+        assertEquals(404, getStatus(foreign, quotePath));
+        quoteRequest(owner, endpoint, "quote-key", 4_000_000, 6).andExpect(status().isConflict());
+        patchFinances(owner, "50001");
+        assertEquals(410, getStatus(owner, quotePath));
+        assertEquals(410, getStatus(owner, endpoint + "/options"));
+        quoteRequest(owner, endpoint, "quote-key", 5_000_000, 6).andExpect(status().isGone());
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "ETF_PHASE02_POSTGRES", matches = "true")
+    void quoteExpiryRejectsReadsAndReplaysAndOfferExpiryCapsNewQuotes() throws Exception {
+        var owner = account(true);
+        UUID reference = UUID.fromString(quoteOffer(owner));
+        String endpoint = "/api/borrower/loans/offers/" + reference;
+        var offerExpiry = OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(5).withNano(0);
+        jdbc.update("update eligibility_assessments set result_expires_at = ? where offer_reference = ?", offerExpiry, reference);
+        var quote = json.readTree(quoteRequest(owner, endpoint, "expiring", 1_000_000, 6)
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsByteArray());
+        assertEquals(offerExpiry.toInstant(), Instant.parse(quote.path("expiresAt").asText()));
+        UUID id = UUID.fromString(quote.path("id").asText());
+        jdbc.update("update loan_quotations set created_at = now() - interval '20 min', "
+                + "expires_at = now() - interval '1 min' where id = ?", id);
+        assertEquals(410, getStatus(owner, "/api/borrower/loans/quotes/" + id));
+        quoteRequest(owner, endpoint, "expiring", 1_000_000, 6).andExpect(status().isGone());
+        quoteRequest(owner, endpoint, "renewed", 1_000_000, 6).andExpect(status().isOk());
+        jdbc.update("update eligibility_assessments set result_expires_at = now() - interval '1 min' where offer_reference = ?", reference);
+        quoteRequest(owner, endpoint, "new-key", 1_000_000, 6).andExpect(status().isGone());
+    }
+
+    private String quoteOffer(Account owner) throws Exception {
+        var result = awaitStatus(owner, start(owner, "loan-offer"), 200);
+        return json.readTree(result.getResponse().getContentAsByteArray()).at("/offer/applicationReference").asText();
+    }
+
+    private org.springframework.test.web.servlet.ResultActions quoteRequest(Account owner, String endpoint, String key,
+                                                                             long amount, int months) throws Exception {
+        return mvc.perform(post(endpoint + "/quotes").header("Authorization", owner.bearer())
+                .header("Idempotency-Key", key).contentType("application/json")
+                .content("{\"amountPaise\":" + amount + ",\"months\":" + months + "}"));
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode raceQuote(Account owner, String endpoint, CountDownLatch ready) {
+        try {
+            ready.countDown();
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            return json.readTree(quoteRequest(owner, endpoint, "quote-key", 5_000_000, 6).andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsByteArray());
+        } catch (Exception error) {
+            throw new IllegalStateException(error);
+        }
+    }
 
     @Test
     void requiresBearerVerifiedProfileAndExplicitConsentAndRejectsClientDecision() throws Exception {

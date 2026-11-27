@@ -15,6 +15,7 @@ class LoanPlan {
 
 class LoanQuote {
   const LoanQuote({
+    this.id,
     required this.principalPaise,
     required this.months,
     required this.totalRepaymentPaise,
@@ -32,6 +33,7 @@ class LoanQuote {
     this.keyFacts,
   });
 
+  final String? id;
   final int principalPaise;
   final int months;
   final int totalRepaymentPaise;

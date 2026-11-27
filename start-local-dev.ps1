@@ -27,7 +27,7 @@ try {
             throw "The workspace backend is running but unhealthy. Check $DevData\backend.err.log and backend.out.log before stopping it."
         }
         $state = Get-Content -LiteralPath $DevState -Raw | ConvertFrom-Json
-        if ($state.providerConfiguration -ne 1 -or $state.eligibilityScenario -ine $EligibilityScenario) {
+        if ($state.providerConfiguration -ne 2 -or $state.eligibilityScenario -ine $EligibilityScenario) {
             Write-Host 'Restarting the tracked workspace backend to apply the local provider settings.'
             Stop-DevBackend $process
             $process = $null
@@ -89,7 +89,8 @@ try {
             '--server.address=127.0.0.1', '--server.port=8080',
             '--spring.flyway.enabled=false', '--spring.jpa.hibernate.ddl-auto=validate',
             '--etf.otp.mock-enabled=true', '--etf.demo.enabled=false', '--etf.pan.synthetic-enabled=true',
-            '--etf.eligibility.synthetic-enabled=true', "--etf.eligibility.synthetic-scenario=$EligibilityScenario")
+            '--etf.eligibility.synthetic-enabled=true', "--etf.eligibility.synthetic-scenario=$EligibilityScenario",
+            '--etf.loan-pricing.synthetic-enabled=true')
         $protectedOtp = ConvertFrom-SecureString (ConvertTo-SecureString $MockOtpCode -AsPlainText -Force)
         $deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
         $startupLog = Join-Path $DevData 'backend.out.log'
@@ -121,7 +122,7 @@ try {
             $healthy = $false
             if (!$process.HasExited) {
                 @{workspace=$DevRoot; pid=$process.Id; executable=$java; started=$process.StartTime.ToUniversalTime().Ticks.ToString()
-                    mockOtp=$protectedOtp; providerConfiguration=1; eligibilityScenario=$EligibilityScenario} |
+                    mockOtp=$protectedOtp; providerConfiguration=2; eligibilityScenario=$EligibilityScenario} |
                     ConvertTo-Json | Set-Content -LiteralPath $DevState
                 do {
                     if ($process.HasExited) { break }

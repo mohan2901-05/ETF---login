@@ -45,8 +45,8 @@ class LoanSelectionScreen extends StatefulWidget {
 
 class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
   late Future<List<LoanAmountOption>> _options = _loadOptions();
-  int? _amountIndex;
-  int? _planIndex;
+  int? _amountPaise;
+  int? _months;
   bool _reviewOpen = false;
   bool _validatingOffer = false;
   bool _offerCheckFailed = false;
@@ -103,6 +103,13 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
       );
       return options.where((option) => option.plans.isNotEmpty).toList()
         ..sort((a, b) => a.amountPaise.compareTo(b.amountPaise));
+    } on LoanQuoteStale {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && ModalRoute.isCurrentOf(context) == true) {
+          Navigator.of(context).pop(LoanSelectionExit.staleOffer);
+        }
+      });
+      rethrow;
     } on InvalidSessionException {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && ModalRoute.isCurrentOf(context) == true)
@@ -112,17 +119,43 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
     }
   }
 
-  void _selectAmount(int index) {
-    if (_amountIndex == index) return;
+  void _selectAmount(int amountPaise) {
+    if (_amountPaise == amountPaise) return;
     setState(() {
-      _amountIndex = index;
-      _planIndex = null;
+      _amountPaise = amountPaise;
+      _months = null;
     });
   }
 
   Future<void> _review(LoanAmountOption option, LoanPlan plan) async {
     if (_reviewOpen) return;
     _reviewOpen = true;
+    final service = widget.service;
+    String? key;
+    String? quoteId;
+    Future<LoanQuote> load() async {
+      if (service is PersistedLoanQuoteService) {
+        if (quoteId case final id?) {
+          return service.getQuote(accessToken: widget.accessToken, id: id);
+        }
+        final quote = await service.requestQuote(
+          accessToken: widget.accessToken,
+          offerReference: widget.offerReference,
+          amountPaise: option.amountPaise,
+          months: plan.months,
+          idempotencyKey: key ??= newLoanQuoteKey(),
+        );
+        quoteId = quote.id;
+        return quote;
+      }
+      return service.requestQuote(
+        accessToken: widget.accessToken,
+        offerReference: widget.offerReference,
+        amountPaise: option.amountPaise,
+        months: plan.months,
+      );
+    }
+
     try {
       await Navigator.of(context).push<void>(
         MaterialPageRoute(
@@ -143,15 +176,21 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
                 ),
               );
             },
-            loadQuote: () => widget.service.requestQuote(
-              accessToken: widget.accessToken,
-              offerReference: widget.offerReference,
-              amountPaise: option.amountPaise,
-              months: plan.months,
-            ),
+            loadQuote: load,
+            revalidateQuote: service is PersistedLoanQuoteService ? load : null,
+            renewQuote: service is PersistedLoanQuoteService
+                ? () {
+                    key = null;
+                    quoteId = null;
+                    return load();
+                  }
+                : null,
           ),
         ),
       );
+      if (mounted && service is PersistedLoanQuoteService) {
+        await _verifyCurrentOffer();
+      }
     } finally {
       _reviewOpen = false;
     }
@@ -179,6 +218,9 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
               if (snapshot.error is InvalidSessionException) {
                 return const BorrowerNotice('Your session has expired.');
               }
+              if (snapshot.error is LoanQuoteStale) {
+                return const BorrowerNotice('This offer is no longer current.');
+              }
               if (snapshot.error is LoanQuoteUnavailable ||
                   snapshot.data?.isEmpty == true) {
                 return const BorrowerNotice(
@@ -200,9 +242,15 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
 
   Widget _selection(BuildContext context, List<LoanAmountOption> options) {
     final typography = Theme.of(context).textTheme;
-    final index = _amountIndex ?? 0;
+    final selectedAmount = options.indexWhere(
+      (option) => option.amountPaise == _amountPaise,
+    );
+    final index = selectedAmount < 0 ? 0 : selectedAmount;
     final option = options[index];
-    final planIndex = _planIndex;
+    final selectedPlan = option.plans.indexWhere(
+      (plan) => plan.months == _months,
+    );
+    final planIndex = selectedPlan < 0 ? null : selectedPlan;
     final note = planIndex == null
         ? null
         : option.plans[planIndex].affordabilityNote;
@@ -218,6 +266,17 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
               DropdownButton<int>(
                 isExpanded: true,
                 itemHeight: null,
+                style: typography.titleMedium,
+                selectedItemBuilder: (context) => [
+                  for (final choice in options)
+                    Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: Text(
+                        formatLoanAmount(choice.amountPaise),
+                        style: typography.displayMedium,
+                      ),
+                    ),
+                ],
                 value: index,
                 items: [
                   for (final (index, choice) in options.indexed)
@@ -231,21 +290,53 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
                 ],
                 onChanged: options.length > 1
                     ? (value) {
-                        if (value != null) _selectAmount(value);
+                        if (value != null)
+                          _selectAmount(options[value].amountPaise);
                       }
                     : null,
               ),
               if (options.length > 1)
-                Semantics(
-                  label: 'Loan amount',
-                  child: Slider(
-                    max: (options.length - 1).toDouble(),
-                    divisions: options.length - 1,
-                    value: index.toDouble(),
-                    semanticFormatterCallback: (value) =>
-                        formatLoanAmount(options[value.round()].amountPaise),
-                    onChanged: (value) => _selectAmount(value.round()),
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 5,
+                    activeTrackColor: ThemeConfig.primaryGreen,
+                    inactiveTrackColor: ThemeConfig.ruleStrong,
+                    thumbColor: ThemeConfig.primaryGreenMid,
+                    overlayColor: ThemeConfig.tintGreen,
+                    tickMarkShape: const RoundSliderTickMarkShape(
+                      tickMarkRadius: 0,
+                    ),
                   ),
+                  child: Semantics(
+                    label: 'Loan amount',
+                    child: Slider(
+                      max: (options.length - 1).toDouble(),
+                      divisions: options.length - 1,
+                      value: index.toDouble(),
+                      semanticFormatterCallback: (value) =>
+                          formatLoanAmount(options[value.round()].amountPaise),
+                      onChanged: (value) =>
+                          _selectAmount(options[value.round()].amountPaise),
+                    ),
+                  ),
+                ),
+              if (options.length > 1)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        formatLoanAmount(options.first.amountPaise),
+                        style: typography.bodySmall,
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        formatLoanAmount(options.last.amountPaise),
+                        style: typography.bodySmall,
+                        textAlign: TextAlign.end,
+                      ),
+                    ),
+                  ],
                 ),
             ],
           ),
@@ -253,31 +344,81 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
         const SizedBox(height: 18),
         Text('Repayment term', style: typography.titleMedium),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final (index, plan) in option.plans.indexed)
-              ChoiceChip(
-                label: Text(
-                  plan.emiPaise == null
-                      ? '${plan.months} months'
-                      : '${plan.months} months\n${formatLoanAmount(plan.emiPaise!)} EMI',
-                ),
-                selected: planIndex == index,
-                selectedColor: ThemeConfig.tintGreen,
-                onSelected: (selected) =>
-                    setState(() => _planIndex = selected ? index : null),
-              ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const gap = 8.0;
+            final minWidth =
+                MediaQuery.textScalerOf(context).scale(14) * 6.8 + 12;
+            final columns = ((constraints.maxWidth + gap) / (minWidth + gap))
+                .floor()
+                .clamp(1, 3);
+            final width =
+                (constraints.maxWidth - (columns - 1) * gap) / columns;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                for (final (index, plan) in option.plans.indexed)
+                  SizedBox(
+                    width: width,
+                    child: ChoiceChip(
+                      label: SizedBox(
+                        width: double.infinity,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          spacing: 4,
+                          children: [
+                            Text(
+                              '${plan.months} months',
+                              textAlign: TextAlign.center,
+                              style: typography.labelLarge,
+                            ),
+                            if (plan.emiPaise case final emi?)
+                              Text(
+                                '${formatLoanAmount(emi)} EMI',
+                                textAlign: TextAlign.center,
+                                style: typography.bodySmall,
+                              ),
+                          ],
+                        ),
+                      ),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 10,
+                      ),
+                      selected: planIndex == index,
+                      showCheckmark: false,
+                      backgroundColor: ThemeConfig.cardBg,
+                      selectedColor: ThemeConfig.tintGreen,
+                      side: BorderSide(
+                        color: planIndex == index
+                            ? ThemeConfig.primaryGreenMid
+                            : ThemeConfig.ruleStrong,
+                        width: planIndex == index ? 2 : 1,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(
+                          ThemeConfig.radiusBase,
+                        ),
+                      ),
+                      onSelected: (selected) => setState(
+                        () => _months = selected ? plan.months : null,
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
         if (note != null) ...[const SizedBox(height: 12), BorrowerNotice(note)],
         const SizedBox(height: 24),
         PrimaryButton(
           title: 'Review quote',
-          enabled: planIndex != null,
+          enabled: planIndex != null && note == null,
           onPressed: () {
-            if (planIndex != null) _review(option, option.plans[planIndex]);
+            if (planIndex != null && note == null)
+              _review(option, option.plans[planIndex]);
           },
         ),
       ],

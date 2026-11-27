@@ -125,11 +125,21 @@ public class EligibilityService {
     /** Server-side guard for a downstream consumer of a borrower offer. */
     @Transactional
     public Offer requireOffer(UUID owner, UUID reference) {
+        return lockedOffer(owner, reference).offer();
+    }
+
+    record CurrentOffer(UUID assessmentId, long revision, Instant expiresAt, boolean synthetic, Offer offer) {}
+
+    @Transactional
+    CurrentOffer lockedOffer(UUID owner, UUID reference) {
         if (reference == null) throw missing();
         var profile = profiles.lockByUserId(owner).orElseThrow(EligibilityService::missing);
         var row = assessments.findByProfileIdAndOfferReference(owner, reference).orElseThrow(EligibilityService::missing);
         Instant now = Instant.now();
-        return present(current(owner, profile, row, now), now).offer();
+        var result = present(current(owner, profile, row, now), now);
+        if (result.offer() == null) throw missing();
+        return new CurrentOffer(result.id(), profile.financialRevision(), result.expiresAt(),
+                result.synthetic(), result.offer());
     }
 
     private EligibilityAssessment current(UUID owner, BorrowerProfile profile, EligibilityAssessment row, Instant now) {

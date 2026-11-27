@@ -10,6 +10,7 @@ import 'package:etf_loans/features/eligibility/api_eligibility_service.dart';
 import 'package:etf_loans/features/eligibility/eligibility_flow.dart';
 import 'package:etf_loans/features/eligibility/eligibility_models.dart';
 import 'package:etf_loans/features/eligibility/eligibility_service.dart';
+import 'package:etf_loans/features/loan_application/api_loan_quote_service.dart';
 import 'package:etf_loans/features/loan_application/loan_quote_service.dart';
 import 'package:etf_loans/features/loan_application/loan_selection_screen.dart';
 import 'package:etf_loans/features/onboarding/api_borrower_service.dart';
@@ -24,14 +25,14 @@ class HomeScreen extends StatefulWidget {
   final String? initialToken;
   final BorrowerService? borrowerService;
   final EligibilityService? eligibilityService;
-  final LoanQuoteService loanQuoteService;
+  final LoanQuoteService? loanQuoteService;
 
   const HomeScreen({
     this.initialUser,
     this.initialToken,
     this.borrowerService,
     this.eligibilityService,
-    this.loanQuoteService = const UnavailableLoanQuoteService(),
+    this.loanQuoteService,
     super.key,
   });
 
@@ -43,6 +44,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late final AuthenticationService _authService;
   late final BorrowerService _apiBorrowerService;
   late final EligibilityService _apiEligibilityService;
+  late final LoanQuoteService _apiLoanQuoteService;
   late final FlutterSecureStorage _secureStorage;
 
   UserProfile? _user;
@@ -60,6 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _authService = AuthenticationService(networkService: network);
     _apiBorrowerService = ApiBorrowerService(network);
     _apiEligibilityService = ApiEligibilityService(network);
+    _apiLoanQuoteService = ApiLoanQuoteService(network);
     _secureStorage = const FlutterSecureStorage();
     _initializeUser();
   }
@@ -205,9 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
             accessToken: token,
             offerReference: reference,
             syntheticOffer: assessment.synthetic,
-            service: assessment.synthetic
-                ? const UnavailableLoanQuoteService()
-                : widget.loanQuoteService,
+            service: widget.loanQuoteService ?? _apiLoanQuoteService,
             revalidateOffer: () =>
                 (widget.eligibilityService ?? _apiEligibilityService)
                     .confirmOffer(accessToken: token, assessment: assessment),

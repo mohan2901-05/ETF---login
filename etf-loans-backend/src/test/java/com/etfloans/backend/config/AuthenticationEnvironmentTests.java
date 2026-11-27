@@ -27,6 +27,15 @@ class AuthenticationEnvironmentTests {
     }
 
     @Test
+    void quoteRegressionDatabaseIsReservedForIsolatedTests() {
+        String url = "spring.datasource.url=jdbc:postgresql://127.0.0.1:5432/etf_be04_suite";
+        runner.withPropertyValues("spring.profiles.active=test", url, "spring.jpa.hibernate.ddl-auto=validate")
+                .run(context -> assertThat(context).hasNotFailed());
+        runner.withPropertyValues("spring.profiles.active=production", url)
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
     void localRequiresAnIsolatedDatabaseAndSeparateKeyWithFlywayDisabled() {
         String key = "local-test-fixture-key-for-guard-only";
         var local = runner.withPropertyValues("spring.profiles.active=local", "etf.otp.mock-enabled=true",

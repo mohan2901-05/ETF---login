@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 public class AuthenticationEnvironment {
     private static final String DEVICE_DATABASE = "etf_loans_device";
     private static final String TEST_DATABASE = "etf_phase02_suite";
+    private static final String QUOTE_TEST_DATABASE = "etf_be04_suite";
     private static final Pattern LOOPBACK = Pattern.compile("jdbc:postgresql://127\\.0\\.0\\.1:[0-9]{1,5}/([a-z0-9_]+)");
 
     @Bean
@@ -45,7 +46,7 @@ public class AuthenticationEnvironment {
             }
         } else if (test) {
             boolean h2 = datasource.equals("jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL");
-            boolean postgres = isolatedPostgres(datasource, TEST_DATABASE)
+            boolean postgres = (isolatedPostgres(datasource, TEST_DATABASE) || isolatedPostgres(datasource, QUOTE_TEST_DATABASE))
                     && "validate".equals(environment.getProperty("spring.jpa.hibernate.ddl-auto"));
             if (alternateDatasource || (!h2 && !postgres)
                     || !environment.getProperty("spring.flyway.url", "").isBlank()) {
@@ -83,6 +84,7 @@ public class AuthenticationEnvironment {
         String path = url.split("[?;]", 2)[0];
         String database = URLDecoder.decode(path.substring(path.lastIndexOf('/') + 1), StandardCharsets.UTF_8);
         return DEVICE_DATABASE.equalsIgnoreCase(database) || TEST_DATABASE.equalsIgnoreCase(database)
+                || QUOTE_TEST_DATABASE.equalsIgnoreCase(database)
                 || "etf_phase02_migration".equalsIgnoreCase(database);
     }
 }

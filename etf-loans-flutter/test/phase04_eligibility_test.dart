@@ -6,6 +6,7 @@ import 'package:etf_loans/features/authentication/screens/home_screen.dart';
 import 'package:etf_loans/features/eligibility/eligibility_flow.dart';
 import 'package:etf_loans/features/eligibility/eligibility_models.dart';
 import 'package:etf_loans/features/eligibility/eligibility_service.dart';
+import 'package:etf_loans/features/loan_application/loan_quote_service.dart';
 import 'package:etf_loans/features/onboarding/borrower_details.dart';
 import 'package:etf_loans/features/onboarding/borrower_service.dart';
 import 'package:etf_loans/theme/theme_config.dart';
@@ -423,6 +424,7 @@ Future<void> _openHome(
         ),
         initialToken: 'synthetic-test-session',
         eligibilityService: service,
+        loanQuoteService: const UnavailableLoanQuoteService(),
         borrowerService: borrower,
       ),
     ),

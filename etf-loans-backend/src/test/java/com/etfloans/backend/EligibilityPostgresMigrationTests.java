@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @EnabledIfEnvironmentVariable(named = "ETF_BE03_MIGRATION_URL", matches = ".+")
 class EligibilityPostgresMigrationTests {
     @Test
-    void v4PreservesV3AndAuthenticationData() {
+    void v4AndV5PreservePreviouslyMigratedData() {
         String url = System.getenv("ETF_BE03_MIGRATION_URL");
         assertTrue(url.matches("jdbc:postgresql://127\\.0\\.0\\.1:[0-9]{1,5}/etf_be03_migration"));
         try (var datasource = new HikariDataSource()) {
@@ -48,14 +48,38 @@ class EligibilityPostgresMigrationTests {
                     "select * from flyway_schema_history where version in ('1','2','3') order by installed_rank");
             // PostgreSQL preserves the original profile column values when adding the defaulted revision.
             var before = queries.stream().map(query -> jdbc.queryForList(query).stream().map(Object::toString).toList()).toList();
-            var v4 = Flyway.configure().dataSource(datasource).locations(locations).load();
+            var v4 = Flyway.configure().dataSource(datasource).locations(locations).target("4").load();
             assertEquals(1, v4.migrate().migrationsExecuted);
-            v4.validate();
+            Flyway.configure().dataSource(datasource).locations(locations)
+                    .ignoreMigrationPatterns("*:pending").load().validate();
             assertEquals(before, queries.stream().map(query -> jdbc.queryForList(query).stream().map(Object::toString).toList()).toList());
             assertEquals(0L, jdbc.queryForObject("select financial_revision from borrower_profiles where user_id = ?", Long.class, user));
             assertEquals(0, jdbc.queryForObject("select count(*) from eligibility_assessments", Integer.class));
             assertEquals(List.of("1", "2", "3", "4"),
                     jdbc.queryForList("select version from flyway_schema_history order by installed_rank", String.class));
+
+            jdbc.update("""
+                    insert into eligibility_assessments
+                    (id, profile_id, financial_revision, idempotency_key, kind, state, consent_version,
+                     consented_at, created_at, updated_at, processing_deadline, result_expires_at,
+                     decision, approved_limit_paise, affordable_monthly_emi_paise, offer_reference, synthetic)
+                    values (?, ?, 0, 'v4-fixture', 'INITIAL', 'COMPLETED', 1, now(), now(), now(),
+                            now() + interval '20 sec', now() + interval '1 hour',
+                            'ELIGIBLE', 5000000, 1000000, ?, true)
+                    """, UUID.randomUUID(), user, UUID.randomUUID());
+            var preserved = List.of("users", "user_sessions", "otp_challenges", "password_grants",
+                    "borrower_profiles", "eligibility_assessments", "flyway_schema_history");
+            var snapshots = preserved.stream().map(table -> "select to_jsonb(t)::text from " + table
+                    + " t" + (table.equals("flyway_schema_history") ? " where installed_rank <= 4 order by installed_rank" : ""))
+                    .toList();
+            var beforeV5 = snapshots.stream().map(query -> jdbc.queryForList(query, String.class)).toList();
+            var v5 = Flyway.configure().dataSource(datasource).locations(locations).load();
+            assertEquals(1, v5.migrate().migrationsExecuted);
+            v5.validate();
+            assertEquals(beforeV5, snapshots.stream().map(query -> jdbc.queryForList(query, String.class)).toList());
+            assertEquals(List.of("1", "2", "3", "4", "5"),
+                    jdbc.queryForList("select version from flyway_schema_history order by installed_rank", String.class));
+            assertEquals(0, jdbc.queryForObject("select count(*) from loan_quotations", Integer.class));
         }
     }
 }

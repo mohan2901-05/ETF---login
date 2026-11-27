@@ -4,7 +4,7 @@ Use PowerShell 5.1 from the repository root. The scripts honor the machine's exe
 
 ## One-time setup
 
-- Keep JDK 17 available through `JAVA_HOME` for Spring Boot and Maven. Android builds prefer Android Studio's bundled JDK and accept `-Jdk` for a compatible alternative.
+- Keep JDK 17 available through `JAVA_HOME` for Spring Boot and Maven. GitHub Actions provisions its own pinned JDK for APK builds.
 - Put Flutter's `bin`, Maven's `bin` and the Android SDK's `platform-tools` on the Windows user PATH once. Set `ANDROID_HOME` to the installed SDK. Restart Antigravity after environment changes.
 - Copy the existing DPAPI-encrypted `device.local.clixml` into the ignored `.local-dev\` directory. It can be decrypted by the Windows account and computer that created it. Use `-Credentials` for an alternative file. Keep its target on loopback and use the pre-provisioned synthetic-only `etf_loans_device` database.
 - Enable USB debugging on the phone and approve this computer. If several physical devices are online, pass `-DeviceSerial`.
@@ -41,26 +41,33 @@ $env:FLUTTER_ROOT = $flutter
 
 The backend launcher supplies mock OTP, synthetic PAN and the `financial-fixture` eligibility scenario on each fresh start. These work in a new terminal using the existing encrypted configuration. A matching healthy process is reused. A tracked Java process started by the old launcher or with a different fixture is restarted. Pass `-EligibilityScenario` with `eligible`, `ineligible` or `failure` to switch fixtures. Keep the displayed mock OTP in your local terminal.
 
-For device work and backend shutdown, run from the repository root.
+Start waits for health on port 8080 and generates a synthetic OTP for that backend session. The default cooldown is 10 seconds, startup Flyway is disabled, and Hibernate validates the installed schema. If PostgreSQL enters recovery and Java exits, the launcher waits for PostgreSQL and retries within the startup timeout. After a backend restart, request a new OTP challenge and use the code from that launch.
 
-```powershell
-.\start-local-dev.ps1
-.\build-install.ps1
-.\stop-local-dev.ps1
-```
+The launcher packages the backend from the local Maven cache when main sources or the POM change, then starts the executable JAR directly with Java. Packaging diagnostics are in `.local-dev\backend-build.log`. For startup failures, inspect `.local-dev\backend.out.log` and `.local-dev\backend.err.log`.
 
-Start waits for health on port 8080, generates a synthetic OTP for that backend session and restores ADB reverse when the phone is online. The default cooldown is 10 seconds, startup Flyway is disabled, and Hibernate validates the installed schema.
-If PostgreSQL enters recovery during startup and Java exits, the launcher waits for PostgreSQL and retries within the startup timeout. After a backend restart, request a new OTP challenge and use the code from that launch.
-
-Use `.\build-install.ps1 -InstallOnly` for a previously built APK or `.\build-install.ps1 -SkipInstall` to build without attaching the phone. The build uses CMD, one Gradle worker and an ARM64 target for this invocation. Install preserves existing app data.
-
-If a direct Flutter command fails while Gradle starts `flutter.bat`, use `build-install.ps1`. It selects the SDK explicitly, uses a single-use Gradle process and retries a launch failure once. The first failed attempt is preserved in `.local-dev\apk-build-first-attempt.log`. If Windows still reports `0xC0000005`, run the script from a normal Windows Terminal PowerShell session outside the IDE. Use `-Verbose` to capture the Gradle stacktrace.
-
-The launcher packages the backend from the local Maven cache when main sources or the POM change, then starts the executable JAR directly with Java. Packaging diagnostics are in `.local-dev\backend-build.log`. For startup failures, inspect `.local-dev\backend.out.log` and `.local-dev\backend.err.log`. The Android build log is `.local-dev\apk-build.log`.
-
-Stop checks the recorded workspace, executable, process ID and creation time. Stale records are cleared. If a different process owns port 8080, identify it independently.
+Run `.\stop-local-dev.ps1` from the repository root to stop the tracked backend. The script checks the recorded workspace, executable, process ID and creation time. If a different process owns port 8080, identify it independently.
 
 The workspace also supplies VS Code-format tasks under `.vscode/tasks.json`. Use them if Antigravity exposes **Tasks: Run Task**. The PowerShell commands work independently of the IDE.
+
+## Android APK build and device setup
+
+Use GitHub Actions on Ubuntu as the preferred APK build workflow. **QA-04C ARM64 debug APK** runs when a push to `feature/borrower-flutter-app` changes `.github/workflows/qa-04c-arm64-debug.yml`. Open the successful run for the intended commit and download the `ETF-Loans-BE04-arm64-debug` artifact. It contains `ETF-Loans-BE04.apk` and its SHA-256 file. [Workflow](../.github/workflows/qa-04c-arm64-debug.yml) · [Accepted run](https://github.com/mohan2901-05/ETF---login/actions/runs/45992861254)
+
+The workflow uses the committed lockfile and pins Flutter 3.50.1, Temurin 17.0.19+10, AGP 9.1.1, Gradle 9.3.1, and NDK 28.2.13676358. It opts in to ARM64 filtering for the app and JNI modules and builds the normal borrower entry point with `API_BASE_URL=http://127.0.0.1:8080`. Its debug manifest enables HTTP to that loopback address.
+
+From the repository root, start the local backend with the phone connected. The launcher restores ADB reverse automatically. If the USB connection is interrupted, restore and verify the mapping explicitly.
+
+```powershell
+.\start-local-dev.ps1 -DeviceSerial 2786684b
+adb -s 2786684b reverse tcp:8080 tcp:8080
+adb -s 2786684b reverse --list
+```
+
+The device connects to its own `127.0.0.1:8080`, and ADB forwards that traffic over USB to the Windows backend. After extracting the artifact, compare `Get-FileHash -Algorithm SHA256 .\ETF-Loans-BE04.apk` with the supplied checksum. From the extraction directory, transfer it with `adb -s 2786684b push .\ETF-Loans-BE04.apk /sdcard/Download/ETF-Loans-BE04.apk` and open it from Downloads for manual installation.
+
+APK updates require the installed app and the replacement to use the same signing certificate. CI and Windows debug keystores can produce different certificates for the same app ID, which triggers an Android signing conflict. Use a build signed with the installed certificate to preserve app data during an upgrade. A fresh installation after removing the old app clears its local data and session. Consistent development signing across CI and Windows remains pending.
+
+Windows APK attempts reached Flutter child-process launch failures, JNI CMake/Ninja access violations and a stalled Flutter launcher. Local diagnostic paths include `.local-dev\apk-build.log` and `.local-dev\apk-build-first-attempt.log`. Prefer the CI artifact after these failures.
 
 ## Borrower profile and PAN
 
@@ -138,4 +145,6 @@ PostgreSQL confirmed revisions 0, 1 and 2 with assessment and offer prefixes `68
 
 DEV-01 and DEV-01A backend automation passed live verification. Two start/stop cycles reached HTTP health, a repeated start reused the tracked Java process, and both scripts refused an unrelated port listener. Hibernate validated the schema with startup Flyway disabled.
 
-DEV-01B's CMD quoting fix passed the Flutter compile task on the diagnostic run. Fresh Android APK build and installation are deferred to the next testing cycle because Windows reported an access violation (`0xC0000005`) in the Flutter subprocess. No fresh APK was installed.
+DEV-01B's CMD quoting fix passed the Flutter compile task on the diagnostic run. Later Windows attempts still encountered an access violation (`0xC0000005`) or a stalled launcher.
+
+QA-04 is closed for the implemented BE-01 through BE-04A scope. GitHub Actions built and verified the ARM64 debug APK from commit `f3a7eba` in run `45992861254`. The transferred APK matched its SHA-256 on POCO F4 serial `2786684b`. The user reported successful installation and **15 of 15** manual acceptance checks. Consistent development signing, two pre-existing eligibility widget failures, and the remaining KYC and loan acceptance integrations are pending. [Acceptance record](ETF_Loans_Master_Plan.md#21-qa-04-physical-android-acceptance)

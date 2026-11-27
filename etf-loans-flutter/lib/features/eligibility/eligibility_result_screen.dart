@@ -41,6 +41,10 @@ class EligibilityResultScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (assessment.synthetic) ...[
+            const BorrowerNotice('Synthetic development result'),
+            const SizedBox(height: 18),
+          ],
           _CreditScoreCard(score: score, checkedAt: assessment.checkedAt),
           const SizedBox(height: 18),
           if (eligible)

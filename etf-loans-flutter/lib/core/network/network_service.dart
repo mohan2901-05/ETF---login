@@ -9,10 +9,11 @@ class NetworkService {
 
   NetworkService({http.Client? client}) : _client = client ?? http.Client();
 
-  Future<Map<String, dynamic>> post(String endpoint, {Map<String, dynamic>? body, String? authToken}) async {
+  Future<Map<String, dynamic>> post(String endpoint, {Map<String, dynamic>? body, String? authToken, String? idempotencyKey}) async {
     final uri = Uri.parse('${Constants.baseUrl}$endpoint');
     final headers = <String, String>{
       'Content-Type': 'application/json',
+      if (idempotencyKey != null) 'Idempotency-Key': idempotencyKey,
     };
     if (authToken != null && authToken.isNotEmpty) {
       headers['Authorization'] = 'Bearer $authToken';
@@ -26,10 +27,15 @@ class NetworkService {
     return _handleResponse(response);
   }
 
-  Future<Map<String, dynamic>> get(String endpoint, {String? authToken}) async {
+  Future<Map<String, dynamic>> get(
+    String endpoint, {
+    String? authToken,
+    bool requireFresh = false,
+  }) async {
     final uri = Uri.parse('${Constants.baseUrl}$endpoint');
     final headers = <String, String>{
       'Content-Type': 'application/json',
+      if (requireFresh) 'Cache-Control': 'no-cache, no-store',
     };
     if (authToken != null && authToken.isNotEmpty) {
       headers['Authorization'] = 'Bearer $authToken';
@@ -109,6 +115,8 @@ class NetworkService {
     final responseBody = {
       'statusCode': response.statusCode,
       'body': response.body,
+      for (final header in response.headers.entries)
+        if (header.key.toLowerCase() == 'location') 'location': header.value,
     };
 
     if (response.statusCode >= 200 && response.statusCode < 300) {

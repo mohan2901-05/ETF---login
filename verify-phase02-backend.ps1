@@ -17,7 +17,8 @@ $started = $false
 $variables = @('SPRING_DATASOURCE_URL', 'SPRING_DATASOURCE_USERNAME', 'SPRING_DATASOURCE_PASSWORD',
     'SPRING_DATASOURCE_DRIVER_CLASS_NAME', 'SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT',
     'SPRING_JPA_HIBERNATE_DDL_AUTO', 'SPRING_FLYWAY_ENABLED', 'SPRING_FLYWAY_URL',
-    'SPRING_FLYWAY_USER', 'SPRING_FLYWAY_PASSWORD', 'ETF_PHASE02_POSTGRES', 'PGPASSWORD')
+    'SPRING_FLYWAY_USER', 'SPRING_FLYWAY_PASSWORD', 'SPRING_FLYWAY_LOCATIONS',
+    'ETF_PHASE02_POSTGRES', 'ETF_BE03_MIGRATION_URL', 'PGPASSWORD')
 $saved = @{}
 foreach ($name in $variables) {
     $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -91,7 +92,7 @@ try {
     $env:PGPASSWORD = $password
     $psql = Join-Path $PostgresBin 'psql.exe'
     $connection = @('-X', '-w', '-h', '127.0.0.1', '-p', "$port", '-U', $user, '-v', 'ON_ERROR_STOP=1')
-    foreach ($database in @('etf_phase02_suite', 'etf_phase02_migration')) {
+    foreach ($database in @('etf_phase02_suite', 'etf_phase02_migration', 'etf_be03_migration')) {
         Require-Native $psql ($connection + @('-d', 'postgres', '-c', "create database $database")) (Join-Path $evidence "$database-setup.log")
     }
     Require-Native $psql ($connection + @('-d', 'etf_phase02_suite', '-At', '-c',
@@ -103,7 +104,9 @@ try {
     $env:SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT = 'org.hibernate.dialect.PostgreSQLDialect'
     $env:SPRING_JPA_HIBERNATE_DDL_AUTO = 'validate'
     $env:SPRING_FLYWAY_ENABLED = 'true'
+    $env:SPRING_FLYWAY_LOCATIONS = 'classpath:db/migration,classpath:db/borrower-local'
     $env:ETF_PHASE02_POSTGRES = 'true'
+    $env:ETF_BE03_MIGRATION_URL = "jdbc:postgresql://127.0.0.1:$port/etf_be03_migration"
     $postgres = Run-Suite 'postgresql'
     if ($h2 -ne 0 -or $postgres -ne 0) {
         throw 'At least one backend suite failed. See the saved Maven and Surefire reports.'

@@ -43,7 +43,10 @@ void main() {
       await _openFlow(
         tester,
         service,
-        onLoanApplicationRequested: (value) => handoff = value,
+        onLoanApplicationRequested: (assessment) async {
+          handoff = assessment.offer?.applicationReference;
+          return false;
+        },
       );
       expect(find.byType(LinearProgressIndicator), findsOneWidget);
       expect(find.text('Choose loan amount'), findsNothing);
@@ -62,14 +65,12 @@ void main() {
     },
   );
 
-  testWidgets('missing service shows unavailable without a decision or retry', (
-    tester,
-  ) async {
+  testWidgets('missing service shows unavailable with a retry', (tester) async {
     await _openFlow(tester, const UnavailableEligibilityService());
     await tester.pumpAndSettle();
     expect(find.text('Eligibility check unavailable'), findsOneWidget);
     expect(find.text('Your eligibility result'), findsNothing);
-    expect(find.text('Retry check'), findsNothing);
+    expect(find.text('Retry check'), findsOneWidget);
     expect(find.text('Update details'), findsOneWidget);
   });
 
@@ -91,6 +92,7 @@ void main() {
         EligibilityCheckKind.initial,
         EligibilityCheckKind.initial,
       ]);
+      expect(service.keys.toSet(), hasLength(1));
 
       service.requests.last.complete(
         const EligibilityAssessment(
@@ -135,6 +137,8 @@ void main() {
       borrower.onboarding.complete();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      expect(service.kinds, isEmpty);
+      await _grantCreditConsent(tester);
       expect(service.kinds, [EligibilityCheckKind.initial]);
       expect(find.text('Checking your eligibility'), findsOneWidget);
       service.requests.single.complete(_syntheticApproved);
@@ -162,6 +166,8 @@ void main() {
       borrower.update.complete();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      expect(service.kinds, isEmpty);
+      await _grantCreditConsent(tester);
       expect(service.kinds, [EligibilityCheckKind.recheck]);
       service.requests.first.complete(_syntheticApproved);
       await tester.pumpAndSettle();
@@ -186,13 +192,96 @@ void main() {
       borrower.update.complete();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      expect(service.kinds, [EligibilityCheckKind.recheck]);
+      await _grantCreditConsent(tester);
       expect(service.kinds, [
         EligibilityCheckKind.recheck,
         EligibilityCheckKind.recheck,
       ]);
+      expect(service.keys.toSet(), hasLength(2));
       expect(find.text('Your eligibility result'), findsNothing);
       service.requests.last.complete(_syntheticApproved);
       await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'stale offer blocks handoff and requires fresh consent and a new key',
+    (tester) async {
+      final service = _TestEligibilityService();
+      final verification = Completer<void>();
+      service.onConfirm = () => verification.future;
+      await _openFlow(
+        tester,
+        service,
+        onLoanApplicationRequested: (_) =>
+            fail('Stale offer opened loan selection'),
+      );
+      service.requests.single.complete(_syntheticApproved);
+      await tester.pumpAndSettle();
+      final choose = find.text('Choose loan amount');
+      await tester.ensureVisible(choose);
+      await tester.tap(choose);
+      await tester.pump();
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      verification.completeError(const EligibilityAssessmentStale());
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('previous assessment is out of date'),
+        findsOneWidget,
+      );
+      expect(find.text('Choose loan amount'), findsNothing);
+      final recheck = find.text('Check eligibility again');
+      await tester.tap(recheck);
+      await tester.pump();
+      expect(service.kinds, [EligibilityCheckKind.initial]);
+      await tester.tap(find.byType(CheckboxListTile));
+      await tester.pump();
+      await tester.tap(recheck);
+      await tester.pump();
+      expect(service.kinds, [
+        EligibilityCheckKind.initial,
+        EligibilityCheckKind.recheck,
+      ]);
+      expect(service.keys.toSet(), hasLength(2));
+      service.requests.last.complete(_syntheticApproved);
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'an open loan selection closes when the app resumes with a stale offer',
+    (tester) async {
+      final service = _TestEligibilityService();
+      final borrower = _TestBorrowerService.withExistingProfile();
+      await _openHome(tester, service, borrower);
+      await _tap(tester, 'Manage Account');
+      await tester.ensureVisible(find.text('Save and recheck eligibility'));
+      await tester.tap(find.text('Save and recheck eligibility'));
+      borrower.update.complete();
+      await tester.pumpAndSettle();
+      await _grantCreditConsent(tester);
+      service.requests.single.complete(_syntheticApproved);
+      await tester.pumpAndSettle();
+      await _tap(tester, 'Choose loan amount');
+      expect(
+        find.text('Loan options are currently unavailable.'),
+        findsOneWidget,
+      );
+
+      service.onConfirm = () async => throw const EligibilityAssessmentStale();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Loan options are currently unavailable.'),
+        findsNothing,
+      );
+      expect(
+        find.textContaining('previous assessment is out of date'),
+        findsOneWidget,
+      );
     },
   );
 
@@ -212,18 +301,36 @@ void main() {
 
 class _TestEligibilityService implements EligibilityService {
   final kinds = <EligibilityCheckKind>[];
+  final keys = <String>[];
   final requests = <Completer<EligibilityAssessment>>[];
+  Future<void> Function()? onConfirm;
 
   @override
   Future<EligibilityAssessment> check({
     required String accessToken,
     required EligibilityCheckKind kind,
+    required int consentVersion,
+    required String idempotencyKey,
+    required bool Function() isCancelled,
   }) {
     expect(accessToken, 'synthetic-test-session');
+    expect(consentVersion, 1);
+    expect(isCancelled(), isFalse);
+    keys.add(idempotencyKey);
     kinds.add(kind);
     final request = Completer<EligibilityAssessment>();
     requests.add(request);
     return request.future;
+  }
+
+  @override
+  Future<void> confirmOffer({
+    required String accessToken,
+    required EligibilityAssessment assessment,
+  }) async {
+    expect(accessToken, 'synthetic-test-session');
+    expect(assessment.offer?.applicationReference, 'synthetic-test-offer');
+    await onConfirm?.call();
   }
 }
 
@@ -270,7 +377,7 @@ class _TestBorrowerService implements BorrowerService {
 Future<void> _openFlow(
   WidgetTester tester,
   EligibilityService service, {
-  ValueChanged<String>? onLoanApplicationRequested,
+  Future<bool> Function(EligibilityAssessment)? onLoanApplicationRequested,
   VoidCallback? onSessionExpired,
 }) async {
   await tester.pumpWidget(
@@ -286,6 +393,18 @@ Future<void> _openFlow(
       ),
     ),
   );
+  await _grantCreditConsent(tester);
+}
+
+Future<void> _grantCreditConsent(WidgetTester tester) async {
+  final start = find.text('Check eligibility');
+  await tester.tap(start);
+  await tester.pump();
+  expect(find.byType(CheckboxListTile), findsOneWidget);
+  await tester.tap(find.byType(CheckboxListTile));
+  await tester.pump();
+  await tester.tap(start);
+  await tester.pump();
 }
 
 Future<void> _openHome(

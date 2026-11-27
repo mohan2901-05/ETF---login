@@ -6,6 +6,7 @@ import 'package:etf_loans/core/network/network_service.dart';
 import 'package:etf_loans/theme/theme_config.dart';
 import 'package:etf_loans/features/authentication/models/auth_models.dart';
 import 'package:etf_loans/core/errors/app_errors.dart';
+import 'package:etf_loans/features/eligibility/api_eligibility_service.dart';
 import 'package:etf_loans/features/eligibility/eligibility_flow.dart';
 import 'package:etf_loans/features/eligibility/eligibility_models.dart';
 import 'package:etf_loans/features/eligibility/eligibility_service.dart';
@@ -22,14 +23,14 @@ class HomeScreen extends StatefulWidget {
   final UserProfile? initialUser;
   final String? initialToken;
   final BorrowerService? borrowerService;
-  final EligibilityService eligibilityService;
+  final EligibilityService? eligibilityService;
   final LoanQuoteService loanQuoteService;
 
   const HomeScreen({
     this.initialUser,
     this.initialToken,
     this.borrowerService,
-    this.eligibilityService = const UnavailableEligibilityService(),
+    this.eligibilityService,
     this.loanQuoteService = const UnavailableLoanQuoteService(),
     super.key,
   });
@@ -41,6 +42,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late final AuthenticationService _authService;
   late final BorrowerService _apiBorrowerService;
+  late final EligibilityService _apiEligibilityService;
   late final FlutterSecureStorage _secureStorage;
 
   UserProfile? _user;
@@ -57,6 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final network = NetworkService();
     _authService = AuthenticationService(networkService: network);
     _apiBorrowerService = ApiBorrowerService(network);
+    _apiEligibilityService = ApiEligibilityService(network);
     _secureStorage = const FlutterSecureStorage();
     _initializeUser();
   }
@@ -147,14 +150,15 @@ class _HomeScreenState extends State<HomeScreen> {
             initialKind: result == BorrowerFlowResult.checkEligibility
                 ? EligibilityCheckKind.initial
                 : EligibilityCheckKind.recheck,
-            service: widget.eligibilityService,
+            service: widget.eligibilityService ?? _apiEligibilityService,
             openUpdateDetails: () => _pushBorrowerDetails(
               update: true,
               token: token,
               accountName: user.name,
             ),
             onSessionExpired: () => _expireBorrowerSession(token),
-            onLoanApplicationRequested: (reference) => _openLoanSelection(token, reference),
+            onLoanApplicationRequested: (assessment) =>
+                _openLoanSelection(token, assessment),
           ),
         ),
       );
@@ -181,19 +185,37 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _openLoanSelection(String token, String reference) async {
-    if (_loanSelectionOpen || _accessToken != token || reference.trim().isEmpty) return;
+  Future<bool> _openLoanSelection(
+    String token,
+    EligibilityAssessment assessment,
+  ) async {
+    final reference = assessment.offer?.applicationReference;
+    if (_loanSelectionOpen ||
+        _accessToken != token ||
+        reference == null ||
+        reference.trim().isEmpty) {
+      return false;
+    }
     _loanSelectionOpen = true;
     try {
-      await Navigator.of(context).push<void>(MaterialPageRoute(
-        settings: const RouteSettings(name: '/offer'),
-        builder: (_) => LoanSelectionScreen(
-          accessToken: token,
-          offerReference: reference,
-          service: widget.loanQuoteService,
-          onSessionExpired: () => _expireBorrowerSession(token),
+      final exit = await Navigator.of(context).push<LoanSelectionExit>(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: '/offer'),
+          builder: (_) => LoanSelectionScreen(
+            accessToken: token,
+            offerReference: reference,
+            syntheticOffer: assessment.synthetic,
+            service: assessment.synthetic
+                ? const UnavailableLoanQuoteService()
+                : widget.loanQuoteService,
+            revalidateOffer: () =>
+                (widget.eligibilityService ?? _apiEligibilityService)
+                    .confirmOffer(accessToken: token, assessment: assessment),
+            onSessionExpired: () => _expireBorrowerSession(token),
+          ),
         ),
-      ));
+      );
+      return exit == LoanSelectionExit.staleOffer;
     } finally {
       _loanSelectionOpen = false;
     }

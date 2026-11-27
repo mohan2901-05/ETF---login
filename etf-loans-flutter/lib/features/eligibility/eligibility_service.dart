@@ -6,11 +6,29 @@ abstract interface class EligibilityService {
   Future<EligibilityAssessment> check({
     required String accessToken,
     required EligibilityCheckKind kind,
+    required int consentVersion,
+    required String idempotencyKey,
+    required bool Function() isCancelled,
+  });
+
+  Future<void> confirmOffer({
+    required String accessToken,
+    required EligibilityAssessment assessment,
   });
 }
 
 class EligibilityUnavailable implements Exception {
   const EligibilityUnavailable();
+}
+
+class EligibilityAssessmentStale implements Exception {
+  const EligibilityAssessmentStale();
+}
+
+class EligibilityRequestRejected implements Exception {
+  const EligibilityRequestRejected(this.message);
+
+  final String message;
 }
 
 class UnavailableEligibilityService implements EligibilityService {
@@ -20,6 +38,17 @@ class UnavailableEligibilityService implements EligibilityService {
   Future<EligibilityAssessment> check({
     required String accessToken,
     required EligibilityCheckKind kind,
+    required int consentVersion,
+    required String idempotencyKey,
+    required bool Function() isCancelled,
+  }) async {
+    throw const EligibilityUnavailable();
+  }
+
+  @override
+  Future<void> confirmOffer({
+    required String accessToken,
+    required EligibilityAssessment assessment,
   }) async {
     throw const EligibilityUnavailable();
   }

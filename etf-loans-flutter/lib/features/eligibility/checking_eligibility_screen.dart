@@ -11,12 +11,14 @@ class CheckingEligibilityScreen extends StatelessWidget {
     required this.state,
     required this.onUpdateDetails,
     required this.onRetry,
+    this.errorMessage,
     super.key,
   });
 
   final EligibilityCheckState state;
   final VoidCallback onUpdateDetails;
   final VoidCallback onRetry;
+  final String? errorMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -67,12 +69,12 @@ class CheckingEligibilityScreen extends StatelessWidget {
             EligibilityCheckState.unavailable => const BorrowerNotice(
               'The eligibility service is currently unavailable.',
             ),
-            EligibilityCheckState.failed => const BorrowerNotice(
-              'We couldn’t complete your eligibility check.',
+            EligibilityCheckState.failed => BorrowerNotice(
+              errorMessage ?? 'We couldn’t complete your eligibility check.',
               isError: true,
             ),
           },
-          if (state == EligibilityCheckState.failed) ...[
+          if (state != EligibilityCheckState.loading) ...[
             const SizedBox(height: 24),
             PrimaryButton(title: 'Retry check', onPressed: onRetry),
           ],

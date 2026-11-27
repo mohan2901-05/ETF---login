@@ -34,6 +34,9 @@ public class BorrowerProfile {
     @Column(nullable = false, precision = 14, scale = 2)
     private BigDecimal externalEmi;
 
+    @Column(nullable = false)
+    private long financialRevision;
+
     @Column(nullable = false, updatable = false, length = 10)
     private String maskedPan;
 
@@ -71,6 +74,11 @@ public class BorrowerProfile {
     }
 
     public void updateFinances(Employment employment, BigDecimal monthlyIncome, BigDecimal externalEmi, Instant now) {
+        if (this.employment != null) {
+            if (this.employment == employment && this.monthlyIncome.compareTo(monthlyIncome) == 0
+                    && this.externalEmi.compareTo(externalEmi) == 0) return;
+            this.financialRevision++;
+        }
         this.employment = employment;
         this.monthlyIncome = monthlyIncome;
         this.externalEmi = externalEmi;
@@ -83,4 +91,7 @@ public class BorrowerProfile {
     public BigDecimal monthlyIncome() { return monthlyIncome; }
     public BigDecimal externalEmi() { return externalEmi; }
     public String maskedPan() { return maskedPan; }
+    public long financialRevision() { return financialRevision; }
+    public boolean isPanVerified() { return panVerifiedAt != null; }
+    public String panProviderReference() { return panProviderReference; }
 }

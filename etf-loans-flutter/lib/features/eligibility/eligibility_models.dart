@@ -40,12 +40,16 @@ class LoanOfferSummary {
 class EligibilityAssessment {
   const EligibilityAssessment({
     required this.decision,
+    this.id,
+    this.synthetic = false,
     this.creditScore,
     this.checkedAt,
     this.offer,
   });
 
   final EligibilityDecision decision;
+  final String? id;
+  final bool synthetic;
   final CreditScore? creditScore;
   final DateTime? checkedAt;
   final LoanOfferSummary? offer;

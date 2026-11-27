@@ -50,7 +50,7 @@ class BorrowerPostgresMigrationTests {
                 "select * from flyway_schema_history where version in ('1','2') order by installed_rank");
         var before = authSnapshots.stream().map(jdbc::queryForList).toList();
         var v3 = Flyway.configure().dataSource(datasource)
-                .locations("classpath:db/migration", "classpath:db/borrower-local").load();
+                .locations("classpath:db/migration", "classpath:db/borrower-local").target("3").load();
         assertEquals(1, v3.migrate().migrationsExecuted);
         v3.validate();
         assertEquals(List.of("1", "2", "3"),

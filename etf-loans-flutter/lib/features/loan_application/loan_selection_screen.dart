@@ -1,4 +1,5 @@
 import 'package:etf_loans/core/errors/app_errors.dart';
+import 'package:etf_loans/features/eligibility/eligibility_service.dart';
 import 'package:etf_loans/features/loan_application/loan_amount_format.dart';
 import 'package:etf_loans/features/loan_application/loan_load_widgets.dart';
 import 'package:etf_loans/features/loan_application/loan_quote.dart';
@@ -13,6 +14,8 @@ import 'package:etf_loans/features/verification/additional_verification_service.
 import 'package:etf_loans/features/verification/verification_service.dart';
 import 'package:flutter/material.dart';
 
+enum LoanSelectionExit { staleOffer }
+
 /// Opened by the authenticated eligibility handoff, never a public route.
 class LoanSelectionScreen extends StatefulWidget {
   const LoanSelectionScreen({
@@ -22,6 +25,8 @@ class LoanSelectionScreen extends StatefulWidget {
     this.service = const UnavailableLoanQuoteService(),
     this.verificationService = const UnavailableLoanVerificationService(),
     this.additionalVerificationService,
+    this.syntheticOffer = false,
+    this.revalidateOffer,
     super.key,
   });
 
@@ -31,6 +36,8 @@ class LoanSelectionScreen extends StatefulWidget {
   final LoanQuoteService service;
   final LoanVerificationService verificationService;
   final AdditionalVerificationService? additionalVerificationService;
+  final bool syntheticOffer;
+  final Future<void> Function()? revalidateOffer;
 
   @override
   State<LoanSelectionScreen> createState() => _LoanSelectionScreenState();
@@ -41,6 +48,49 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
   int? _amountIndex;
   int? _planIndex;
   bool _reviewOpen = false;
+  bool _validatingOffer = false;
+  bool _offerCheckFailed = false;
+  AppLifecycleListener? _offerLifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.revalidateOffer != null) {
+      _offerLifecycle = AppLifecycleListener(onResume: _verifyCurrentOffer);
+    }
+  }
+
+  Future<void> _verifyCurrentOffer() async {
+    final verify = widget.revalidateOffer;
+    if (verify == null ||
+        _validatingOffer ||
+        ModalRoute.isCurrentOf(context) != true) {
+      return;
+    }
+    setState(() {
+      _validatingOffer = true;
+      _offerCheckFailed = false;
+    });
+    try {
+      await verify();
+    } on EligibilityAssessmentStale {
+      if (mounted && ModalRoute.isCurrentOf(context) == true) {
+        Navigator.of(context).pop(LoanSelectionExit.staleOffer);
+      }
+    } on InvalidSessionException {
+      if (mounted) widget.onSessionExpired();
+    } catch (_) {
+      _offerCheckFailed = true;
+    } finally {
+      if (mounted) setState(() => _validatingOffer = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _offerLifecycle?.dispose();
+    super.dispose();
+  }
 
   Future<List<LoanAmountOption>> _loadOptions() async {
     if (widget.accessToken.isEmpty || widget.offerReference.trim().isEmpty) {
@@ -110,33 +160,42 @@ class _LoanSelectionScreenState extends State<LoanSelectionScreen> {
   @override
   Widget build(BuildContext context) => BorrowerPage(
     title: 'Choose amount and EMI',
-    description: 'Select a loan amount and repayment term from your offer.',
-    child: FutureBuilder<List<LoanAmountOption>>(
-      future: _options,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const LoanProgress('Loading loan options');
-        }
-        if (snapshot.error is InvalidSessionException) {
-          return const BorrowerNotice('Your session has expired.');
-        }
-        if (snapshot.error is LoanQuoteUnavailable ||
-            snapshot.data?.isEmpty == true) {
-          return const BorrowerNotice(
-            'Loan options are currently unavailable.',
-          );
-        }
-        if (snapshot.hasError) {
-          return LoanLoadError(
-            'We couldn’t load your loan options.',
-            onRetry: () {
-              setState(() => _options = _loadOptions());
+    description: widget.syntheticOffer
+        ? 'Synthetic development offer'
+        : 'Select a loan amount and repayment term from your offer.',
+    child: _validatingOffer
+        ? const LoanProgress('Checking your offer')
+        : _offerCheckFailed
+        ? LoanLoadError(
+            'We couldn’t check your offer.',
+            onRetry: _verifyCurrentOffer,
+          )
+        : FutureBuilder<List<LoanAmountOption>>(
+            future: _options,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const LoanProgress('Loading loan options');
+              }
+              if (snapshot.error is InvalidSessionException) {
+                return const BorrowerNotice('Your session has expired.');
+              }
+              if (snapshot.error is LoanQuoteUnavailable ||
+                  snapshot.data?.isEmpty == true) {
+                return const BorrowerNotice(
+                  'Loan options are currently unavailable.',
+                );
+              }
+              if (snapshot.hasError) {
+                return LoanLoadError(
+                  'We couldn’t load your loan options.',
+                  onRetry: () {
+                    setState(() => _options = _loadOptions());
+                  },
+                );
+              }
+              return _selection(context, snapshot.requireData);
             },
-          );
-        }
-        return _selection(context, snapshot.requireData);
-      },
-    ),
+          ),
   );
 
   Widget _selection(BuildContext context, List<LoanAmountOption> options) {

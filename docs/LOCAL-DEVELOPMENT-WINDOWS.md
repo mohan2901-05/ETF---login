@@ -18,14 +18,16 @@ From the repository root in the first PowerShell terminal, start the isolated ba
 .\start-local-dev.ps1 -SkipPhone
 ```
 
-In a second terminal, run the normal Flutter app in Chrome.
+For Chrome visual acceptance, build the normal Flutter entry point and serve its complete bundle. Rebuild after Flutter source changes.
 
 ```powershell
-Set-Location 'D:\projects\ETF - login\etf-loans-flutter'
-cmd /d /c 'D:\tools\flutter\flutter\bin\flutter.bat --no-version-check run -d chrome --no-pub --web-hostname=127.0.0.1 --web-port=7357 --dart-define=API_BASE_URL=http://127.0.0.1:8080'
+Push-Location .\etf-loans-flutter
+cmd /d /c 'flutter build web --no-pub --no-web-resources-cdn --no-wasm-dry-run --pwa-strategy=none --dart-define=API_BASE_URL=http://127.0.0.1:7360'
+Pop-Location
+node .\serve-local-web.mjs
 ```
 
-If the Flutter batch launcher fails, use the cached Flutter tool from the same directory. When it reports that the app is being served, open `http://127.0.0.1:7357` in Chrome.
+Open `http://127.0.0.1:7360` in a fresh Chrome profile or clear site data for that origin once if it previously served a service-worker build. The server validates the asset manifest, logo, SVG and fonts before binding, serves the bundle with `Cache-Control: no-store`, and forwards `/api/` to port 8080 only when the workspace backend reports local synthetic mode. Restart through the backend launcher after updating an older checkout. If the Flutter batch launcher fails, invoke the cached tool from `etf-loans-flutter`.
 
 ```powershell
 $flutter = 'D:\tools\flutter\flutter'
@@ -33,8 +35,8 @@ $env:FLUTTER_ROOT = $flutter
 & "$flutter\bin\cache\dart-sdk\bin\dart.exe" `
   "--packages=$flutter\packages\flutter_tools\.dart_tool\package_config.json" `
   "$flutter\packages\flutter_tools\bin\flutter_tools.dart" `
-  --no-version-check run -d web-server --no-pub --no-web-resources-cdn `
-  --web-hostname=127.0.0.1 --web-port=7357 --dart-define=API_BASE_URL=http://127.0.0.1:8080
+  --no-version-check build web --no-pub --no-web-resources-cdn --no-wasm-dry-run `
+  --pwa-strategy=none --dart-define=API_BASE_URL=http://127.0.0.1:7360
 ```
 
 The backend launcher supplies mock OTP, synthetic PAN and the `financial-fixture` eligibility scenario on each fresh start. These work in a new terminal using the existing encrypted configuration. A matching healthy process is reused. A tracked Java process started by the old launcher or with a different fixture is restarted. Pass `-EligibilityScenario` with `eligible`, `ineligible` or `failure` to switch fixtures. Keep the displayed mock OTP in your local terminal.
@@ -62,7 +64,7 @@ The workspace also supplies VS Code-format tasks under `.vscode/tasks.json`. Use
 
 ## Borrower profile and PAN
 
-Use the isolated development database provisioned through V4. Its Flyway history records V1 and V2 as a V2 baseline, followed by V3 and V4. Keep the existing provisioned database across daily starts.
+Use the isolated development database provisioned through V5 for BE-04. Its Flyway history records V1 and V2 as a V2 baseline, followed by V3, V4 and V5. Keep the existing provisioned database across daily starts.
 
 For an existing `etf_loans_device` database provisioned without Flyway history, first verify that it is on loopback and that its authentication schema matches V1 and V2. As the migration owner, run Flyway `baseline` with `baselineVersion=2`, then run `migrate` and `validate` with both locations. This records the existing schema without rerunning the authentication migrations.
 
@@ -95,6 +97,16 @@ Invalid profile inputs return HTTP 400. New assessment failures distinguish prov
 For the BE-03C regression, start with the standard launcher, then save income **60000** and EMI **10000** in ETF-014. Give fresh credit consent and confirm the ₹70,000 sample limit and ₹6,000 affordable EMI. Recheck without changing finances to confirm reuse. Change those finances in a second tab to confirm the first tab's previous offer is stale.
 
 BE-03C verification passed nine input pairs against the device PostgreSQL backend after a cold restart. Normal Chrome at port 7357 confirmed the ₹60,000/₹10,000 result, same-revision reuse, and HTTP 410 on both stale offer click and tab resume. Flyway history remained at V4.
+
+## Loan quotations in Chrome
+
+Run `verify-phase02-backend.ps1` with the installed Maven command. Its PostgreSQL run exercises the V4-to-V5 upgrade, quote options, ownership, pricing, affordability, concurrent retries, expiry and financial revision changes. Its H2 run skips PostgreSQL-only tests.
+
+After those checks pass, apply V5 as migration owner on loopback `etf_loans_device` using both existing Flyway locations. Validate Flyway history and grant the existing device runtime role `SELECT, INSERT` on `public.loan_quotations`. Start with `start-local-dev.ps1 -SkipPhone` and use the daily Chrome workflow on port 7360.
+
+With the synthetic ₹42,000 income and ₹1,000 EMI fixture, complete eligibility and choose ₹10,000 for six months. Check that review shows ₹1,200 interest, ₹11,200 repayment, five payments of ₹1,866 and a final payment of ₹1,870. Open the schedule, then return to selection and confirm the term stays selected. Save changed finances in a second tab and verify the prior quote shows a stale notice when reopened or on tab resume. The agreement, Key Facts Statement and final acceptance remain gated.
+
+For Flutter regressions, run `flutter test --no-pub --concurrency=1 test/api_loan_quote_service_test.dart test/phase05_loan_application_test.dart` from `etf-loans-flutter`.
 
 ## QA-02 functional inventory
 

@@ -43,9 +43,9 @@ Some entries may become dialogs or reusable views rather than standalone routes.
 | ETF-020 | Verification | Aadhaar verification result | Provider-state and masked result UI implemented. Backend integration pending. |
 | ETF-021 | Verification | Address and work | Flutter form and in-memory draft implemented. Backend submission pending. |
 | ETF-022 | Verification | Bank account verification | Flutter form and validation implemented. Account verification adapter pending. |
-| ETF-023 | Loan | Choose amount and EMI plan | Flutter UI implemented. Authorized offer options pending. |
-| ETF-024 | Loan | Review and accept | Quote and acknowledgment UI implemented. Verification and final acceptance pending. |
-| ETF-025 | Loan | Expanded repayment schedule | Flutter UI implemented. Authoritative repayment schedule pending. |
+| ETF-023 | Loan | Choose amount and EMI plan | Authenticated options and affordability warnings integrated with local synthetic pricing. |
+| ETF-024 | Loan | Review and accept | Server quotations integrated. Verification and final acceptance pending. |
+| ETF-025 | Loan | Expanded repayment schedule | Server-calculated installments and on-resume quote validation integrated. |
 | ETF-026 | Loan | Agreement and Key Facts Statement | Versioned text viewer implemented. Approved documents and download integration pending. |
 | ETF-027 | Loan | Loan confirmation | Design required |
 | ETF-028 | Main app | Home dashboard | Basic version exists |
@@ -121,7 +121,7 @@ The borrower profile schema is approved for isolated local development. Remainin
 | 02 | Authentication | 004–009, AUTH-10 | Internally accepted on POCO F4 |
 | 03 | Borrower onboarding, PAN, consent and profile | 010–011, 014 | Local Chrome acceptance complete. Live PAN provider and Android acceptance pending. |
 | 04 | Eligibility | 012–014 | Flutter checking and result UI, verified-save handoff and update navigation implemented. Backend-driven assessment and recheck pending. |
-| 05 | Loan selection, review, KFS and agreement | 023–026 | Flutter UI implemented. Offer, quote, schedule, and disclosure integration pending. |
+| 05 | Loan selection, review, KFS and agreement | 023–026 | BE-04 connects ETF-023–025 to authenticated synthetic quotations. ETF-026 disclosures and final acceptance remain gated. |
 | 06A | Face verification and checklist | 015–018 | Flutter UI implemented. Camera and KYC integration pending. |
 | 06B | Aadhaar, address and bank verification | 019–022 | Flutter UI and checklist navigation implemented. Provider and backend integration pending. |
 | 07 | Acceptance and lifecycle | 027 | Authorized sandbox loan workflow |
@@ -205,6 +205,26 @@ BE-01, BE-02, BE-01A and BE-01B are complete for isolated local Chrome developme
 - The reported QA-03 manual run recorded 18 passes across authentication, onboarding and the four original financial fixtures. Subsequent attempts with ₹48,000 income and ₹6,000 EMI failed within 31–71 ms because the synthetic provider used an exact-pair lookup. This was separate from the earlier reported 15 pass, 22 fail and one pending run.
 - BE-03C replaced the lookup with a development-only paise calculation that preserves the four fixture results. The focused backend run passed 16 tests. Nine live device PostgreSQL cases passed, including ₹60,000 income and ₹10,000 EMI, decimal and boundary inputs, and repeat requests. Normal Chrome verified stale-offer HTTP 410 on click and tab resume. V4 remained unchanged.
 - QA-02 verified persisted launcher defaults, authenticated API smoke, the normal Chrome app on port 7357 and all 18 debug-preview entries. QA-03 verified normal Chrome with fresh and existing synthetic borrowers, fixed sign-in route session restoration and the DOB year, and added bounded startup retry for PostgreSQL recovery. Three launcher regressions passed. The Flutter widget runner was blocked by Windows access to Android Studio's Java executable.
+
+## 20. BE-04 loan quotations
+
+- Approved V5 adds only `loan_quotations` in the borrower-local Flyway location. It ties each quote to its current V4 assessment and borrower financial revision and stores an immutable pricing snapshot, the pricing version, an expiry and a borrower-scoped idempotency key.
+- The authenticated contract uses `GET /api/borrower/loans/offers/{offer}/options`, `POST /api/borrower/loans/offers/{offer}/quotes` and `GET /api/borrower/loans/quotes/{id}`. POST requires an `Idempotency-Key` and takes only integer `amountPaise` and `months`. An expired or stale offer or quote returns HTTP 410. Cross-borrower IDs return HTTP 404. The same key and request replay the same current quote. A changed request using that key returns HTTP 409.
+- The opt-in `synthetic-flat-v1` pricing uses ₹10,000 steps through the lower of ₹500,000 and the approved limit, including an off-grid cap. Monthly flat interest is 2% for 3 or 6 months and 3% for 9, 12, 18 or 24 months. Fees are zero. Interest rounds half up to paise, regular EMI rounds down to whole rupees, and the final EMI closes the balance. Affordability uses the larger installment. Due dates follow the issue date in Asia/Kolkata. Quotes expire at the earlier of 15 minutes or offer expiry.
+- Normal Flutter routes consume server options, quote terms and schedule. Reopening the selection preserves the chosen amount and tenure while returning from review. Quote review and schedule revalidate on resume. Approved APR, disclosures and final acceptance remain gated. Production pricing returns HTTP 503 without an approved implementation.
+- Fifteen focused PostgreSQL tests and five focused Flutter quotation tests passed. Focused Dart analysis reported no errors or warnings and five Flutter Material deprecation notices. Two eligibility widget failures in the wider run reproduced on unmodified HEAD. On `etf_loans_device`, Flyway applied V5 only, validated history and verified preservation of existing authentication, borrower and eligibility records. The existing runtime role was granted quote-table SELECT and INSERT.
+- Normal Chrome against `etf_loans_device` verified authenticated ETF-023 options, the ETF-024 ₹10,000 six-month quote, and the ETF-025 persisted schedule. After an income update in a second tab, resuming the open schedule returned HTTP 410 and showed the stale notice. Final acceptance was gated in review.
+
+See [BE-04 local verification](LOCAL-DEVELOPMENT-WINDOWS.md#loan-quotations-in-chrome).
+
+### BE-04A visual verification
+
+- The running debug server on port 7357 returned empty HTTP 404 responses for the Flutter asset manifests, logo and font. A fresh web release contained the generated manifests and original assets. The documented loopback workflow now serves the validated release bundle on port 7360 with caching disabled for local verification.
+- ETF-023 uses the existing brand tokens for the amount, slider and responsive tenure grid. ETF-024 and ETF-025 use matching dividers. Quotation calculations, requests, navigation and stale handling were preserved.
+- Normal Chrome captured the public, sign-in, onboarding, PAN, eligibility, loan selection, review, schedule and verification screens. The corrected three-column tenure grid was inspected at 390 px. Both manifests, the logo, SVG, all three custom fonts and Material Icons returned nonempty HTTP 200 responses.
+- ETF-018 has an offer-scoped checklist interface and unavailable-provider states. An approved backend adapter remains pending. ETF-026 has a versioned viewer and verified unavailable state. Approved agreement and KFS content and download integration remain pending. Final acceptance stayed gated.
+- The fresh ARM64 debug build reached `:app:compileFlutterBuildDebug`, where Windows denied a Flutter child-process launch. No fresh APK was produced.
+- Finalization added a fail-closed proxy check for local synthetic mode. The recorded Chrome acceptance predates this guard. No application rebuild was run during finalization.
 - An approved production provider and ETF-023 loan options remain pending.
 
 ## 20. Working references

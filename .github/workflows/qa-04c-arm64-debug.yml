@@ -1,0 +1,118 @@
+name: QA-04C ARM64 debug APK
+
+on:
+  push:
+    branches:
+      - feature/borrower-flutter-app
+    paths:
+      - .github/workflows/qa-04c-arm64-debug.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+        working-directory: etf-loans-flutter
+    env:
+      FLUTTER_VERSION: '3.50.1'
+      FLUTTER_REVISION: ae9b586f34a8443573f82ef57c3bf914a908cbf7
+      ANDROID_CMDLINE_TOOLS: '23.0'
+      ANDROID_BUILD_TOOLS: '36.0.0'
+      ANDROID_NDK: '28.2.13676358'
+      ANDROID_CMAKE: '3.22.1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        with:
+          distribution: temurin
+          java-version: '17.0.19+10'
+
+      - name: Provision Android tools
+        run: |
+          sdk_root="$ANDROID_HOME"
+          bootstrap="$sdk_root/cmdline-tools/latest/bin/sdkmanager"
+          "$bootstrap" --licenses < <(yes)
+          "$bootstrap" "cmdline-tools;$ANDROID_CMDLINE_TOOLS"
+          "$sdk_root/cmdline-tools/$ANDROID_CMDLINE_TOOLS/bin/sdkmanager" \
+            "platforms;android-35" "platforms;android-36" \
+            "build-tools;$ANDROID_BUILD_TOOLS" "ndk;$ANDROID_NDK" "cmake;$ANDROID_CMAKE"
+          cat > android/local.properties <<EOF
+          sdk.dir=$sdk_root
+          flutter.sdk=$RUNNER_TEMP/flutter
+          cmake.dir=$sdk_root/cmake/$ANDROID_CMAKE
+          EOF
+
+      - name: Provision Flutter and resolve locked dependencies
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_VERSION" \
+            https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          test "$(git -C "$RUNNER_TEMP/flutter" rev-parse HEAD)" = "$FLUTTER_REVISION"
+          "$RUNNER_TEMP/flutter/bin/flutter" --disable-analytics
+          "$RUNNER_TEMP/flutter/bin/flutter" precache --android
+          "$RUNNER_TEMP/flutter/bin/flutter" pub get --enforce-lockfile
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Build borrower debug APK
+        env:
+          ORG_GRADLE_PROJECT_etfArm64Only: 'true'
+          GRADLE_OPTS: '-Dorg.gradle.jvmargs=-Xmx3g -Dorg.gradle.workers.max=2'
+        run: |
+          # Flutter supplies the wrapper launcher. The checked-in wrapper pins Gradle 9.3.1.
+          test ! -e build/app/outputs/flutter-apk/app-debug.apk
+          touch "$RUNNER_TEMP/apk-build-start"
+          flutter build apk --debug --no-pub --target-platform=android-arm64 \
+            --dart-define=API_BASE_URL=http://127.0.0.1:8080
+
+      - name: Verify APK and prepare delivery
+        run: |
+          apk=build/app/outputs/flutter-apk/app-debug.apk
+          tools="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS"
+          test "$apk" -nt "$RUNNER_TEMP/apk-build-start"
+          "$tools/apksigner" verify "$apk"
+          "$tools/aapt2" dump badging "$apk" > "$RUNNER_TEMP/apk-badging"
+          grep -Fx 'application-debuggable' "$RUNNER_TEMP/apk-badging"
+          "$tools/aapt2" dump xmltree --file AndroidManifest.xml "$apk" > "$RUNNER_TEMP/apk-manifest"
+          grep -F 'android.permission.INTERNET' "$RUNNER_TEMP/apk-manifest"
+          grep -F 'android:networkSecurityConfig' "$RUNNER_TEMP/apk-manifest"
+          "$tools/aapt2" dump xmltree --file res/xml/debug_network_security_config.xml "$apk" \
+            > "$RUNNER_TEMP/apk-network-config"
+          grep -F '127.0.0.1' "$RUNNER_TEMP/apk-network-config"
+          python3 - "$apk" <<'PY'
+          import sys
+          from zipfile import ZipFile
+
+          with ZipFile(sys.argv[1]) as apk:
+              corrupt_entry = apk.testzip()
+              if corrupt_entry is not None:
+                  raise SystemExit(f"Corrupt APK entry: {corrupt_entry}")
+              libraries = [name for name in apk.namelist() if name.startswith("lib/") and name.endswith(".so")]
+              required = {"lib/arm64-v8a/libflutter.so", "lib/arm64-v8a/libdartjni.so"}
+              if not required.issubset(libraries):
+                  raise SystemExit("Missing Flutter engine or Dart JNI library")
+              for library in libraries:
+                  with apk.open(library) as entry:
+                      header = entry.read(20)
+                  if (not library.startswith("lib/arm64-v8a/") or
+                          header[:6] != b"\x7fELF\x02\x01" or header[18:20] != b"\xb7\x00"):
+                      raise SystemExit(f"Unexpected native library: {library}")
+          PY
+          cp "$apk" "$RUNNER_TEMP/ETF-Loans-BE04.apk"
+          cd "$RUNNER_TEMP"
+          sha256sum ETF-Loans-BE04.apk > ETF-Loans-BE04.apk.sha256
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ETF-Loans-BE04-arm64-debug
+          path: |
+            ${{ runner.temp }}/ETF-Loans-BE04.apk
+            ${{ runner.temp }}/ETF-Loans-BE04.apk.sha256
+          if-no-files-found: error
+          compression-level: 0

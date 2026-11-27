@@ -4,6 +4,16 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+if (providers.gradleProperty("etfArm64Only").orNull == "true") {
+    // Apply after Flutter has configured its default ABI set.
+    androidComponents.finalizeDsl { android ->
+        android.defaultConfig.ndk.abiFilters.apply {
+            clear()
+            add("arm64-v8a")
+        }
+    }
+}
+
 android {
     namespace = "com.example.etf_loans"
     compileSdk = flutter.compileSdkVersion
